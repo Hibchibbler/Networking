@@ -2,7 +2,7 @@
 // Daniel J Ferguson
 // 2017
 ///////////////////////////////////////////////////////////////////////////////
-
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
 #include "Network.h"
 #include <Ws2tcpip.h>
 #include <iostream>
@@ -188,7 +188,6 @@ Network::Result Network::bindSocket(NetworkState& netstate)
         result.code = WSAGetLastError();
         std::cout << result.code << std::endl;
     }
-
     return result;
 }
 
@@ -285,9 +284,6 @@ Network::Result Network::read(NetworkState& netstate)
     Request* req = nullptr;
     if (netstate.socket.overlapPool.acquire(&req))
     {
-        //req->ioType = Request::IOType::READ;
-        //req->wsabuf.buf = (CHAR*)req->packet.buffer;
-        //req->wsabuf.len = MAX_PACKET_SIZE;
         Network::InitializeReadRequest(req);
 
         DWORD flags = 0;
@@ -408,6 +404,23 @@ bool Network::GetLocalAddressInfo(NetworkState& netstate, Socket & s)
         // Note; we're hoping that the first valid address is the right address. glta. lol.
         s.local.len = res->ai_addrlen;
         memcpy(&s.local.addr, res->ai_addr, res->ai_addrlen);
+
+
+
+        // Print for debug
+        //char ipstr[INET6_ADDRSTRLEN];
+        ADDRINFOW* ptr = NULL;
+        for (ptr = res; ptr != NULL; ptr = ptr->ai_next) 
+        {
+
+
+            struct sockaddr_in *ipv4 = (struct sockaddr_in *) ptr->ai_addr;//(struct sockaddr_in *)&netstate.socket.local.addr;
+            //void* addr = &(ipv4->sin_addr);
+            
+
+            //PCSTR ptr = inet_ntop(AF_INET, addr, ipstr, sizeof(ipstr));
+            std::cout << "Server Bound to IP: " << inet_ntoa(ipv4->sin_addr) << "\n";
+        }
         FreeAddrInfo(res);
     }
 

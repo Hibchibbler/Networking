@@ -62,6 +62,7 @@ struct MESG
         char magic[8];
         uint64_t code;
         uint64_t traits;
+        uint64_t id;
         uint64_t seq;
     }header;
 
@@ -118,23 +119,14 @@ public:
 
 struct ConnManState
 {
-    typedef void(*OnClientEnter) (void*);
-    typedef void(*OnClientLeave) (void*);
-    typedef void(*OnClientUpdate)(void*);
-    typedef void(*OnServerUpdate)(void*);
-
     uint64_t                CurrentConnectionId;
     uint64_t                timeticks;
     uint32_t                done;
 
+    uint32_t                port;
     uint32_t                numplayers;
     std::string             gamename;
     std::string             gamepass;
-
-    OnClientEnter           oce;
-    OnClientLeave           ocl;
-    OnClientUpdate          ocu;
-    OnServerUpdate          osu;
 
     NetworkState            netstate;
     Mutex                   cmmutex;
@@ -160,10 +152,7 @@ public:
     void
     initialize(
         ConnManState & cmstate,
-        ConnManState::OnClientEnter oce, void* entercontext,
-        ConnManState::OnClientLeave ocl, void* leavecontext,
-        ConnManState::OnClientUpdate ocu, void* cupdatecontext,
-        ConnManState::OnServerUpdate osu, void* supdatecontext,
+        uint32_t port,
         uint32_t numplayers,
         std::string gamename,
         std::string gamepass

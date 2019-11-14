@@ -6,20 +6,13 @@ namespace bali
 void
 ConnMan::initialize(
     ConnManState & cmstate,
-    ConnManState::OnClientEnter oce_, void* entercontext,
-    ConnManState::OnClientLeave ocl_, void* leavecontext,
-    ConnManState::OnClientUpdate ocu_, void* cupdatecontext,
-    ConnManState::OnServerUpdate osu_, void* supdatecontext,
+    uint32_t port,
     uint32_t numplayers,
     std::string gamename,
     std::string gamepass
 )
 {
-    cmstate.oce = oce_;
-    cmstate.ocl = ocl_;
-    cmstate.ocu = ocu_;
-    cmstate.osu = osu_;
-
+    cmstate.port = port;
     cmstate.numplayers = numplayers;
     cmstate.gamename = gamename;
     cmstate.gamepass = gamepass;
@@ -28,18 +21,18 @@ ConnMan::initialize(
     cmstate.done = 0;
     cmstate.cmmutex.create();
 
-    Network::initialize(cmstate.netstate, 8, 8967, ConnMan::ConnManIOHandler, &cmstate);
+    Network::initialize(cmstate.netstate, 8, port, ConnMan::ConnManIOHandler, &cmstate);
     Network::start(cmstate.netstate);
 }
 
 
 uint64_t
-readyCount(
+ConnMan::readyCount(
     ConnManState & cmstate
 )
 {
+    uint64_t cnt = 0;
     cmstate.cmmutex.lock();
-    uint64_t cnt =0;
     for (auto c : cmstate.connections)
     {
         if (c.state == Connection::State::WAITFORSTART)
@@ -53,11 +46,28 @@ readyCount(
 
 
 uint64_t
-sendStart(
+ConnMan::sendStart(
     ConnManState & cmstate
 )
 {
-
+    uint64_t cnt = 0;
+    Packet startPacket;
+    cmstate.cmmutex.lock();
+    for (auto c : cmstate.connections)
+    {
+        if (c.state == Connection::State::WAITFORSTART)
+        {
+            MESG* pMsg = (MESG*)startPacket.buffer;
+            startPacket.buffersize = sizeof(MESG);
+            memcpy(pMsg->header.magic, "ABCDEFGH", 8);
+            pMsg->header.code = (uint64_t)MESG::HEADER::Codes::S;
+            pMsg->header.seq = 0;
+            pMsg->header.traits = 0;
+            Network::write(cmstate.netstate, startPacket);
+        }
+    }
+    cmstate.cmmutex.unlock();
+    return 0;
 }
 
 bool
@@ -191,9 +201,9 @@ ConnMan::processWaitForIdentify(
     {
 
         // Store Credentials
-        connection.name = std::string(RxMsg->payload.identify.name, 16);
-        connection.pass = std::string(RxMsg->payload.identify.pass, 16);
-        if (state.gamepass == "" || state.gamepass == connection.pass)
+        connection.name = std::string(RxMsg->payload.identify.name, strlen(RxMsg->payload.identify.name));
+        connection.pass = std::string(RxMsg->payload.identify.pass, strlen(RxMsg->payload.identify.pass));
+        if (state.gamepass == connection.pass)
         {
             connection.state = Connection::State::SENDGRANT;
         }
@@ -232,6 +242,7 @@ ConnMan::processSendDeny(
 )
 {
     bool ret = false;
+    connection.state = Connection::State::WAITFORIDENTIFY;
     return ret;
 }
 
@@ -309,6 +320,49 @@ isGood(
                 {
                     // Not the Code we're looking for
                     std::cout << "Rx: Weird, packet not expected\n";
+                    connection.packets.pop();
+                }
+            }
+            else
+            {
+                // Invalid - Size does not match code
+                std::cout << "Rx: Packet Bad Size\n";
+                connection.packets.pop();
+            }
+        }
+        else
+        {
+            // Invalid - No Magic
+            std::cout << "Rx: Packet Bad Magic\n";
+            connection.packets.pop();
+        }
+    }
+    return ret;
+}
+
+bool
+isGood2(
+    MESG::HEADER::Codes code,
+    Packet & packet
+)
+{
+    bool ret = false;
+    
+    {
+        if (magicMatch(packet))
+        {
+            if (sizeValid(packet))
+            {
+                if (isCode(packet, code))
+                {
+                    //ConnMan::processWaitForIdentify(cmstate, connection, packet);
+                    //std::cout << "Rx Identify.\n";
+                    ret = true;
+                }
+                else
+                {
+                    // Not the Code we're looking for
+                    std::cout << "Rx: Weird, packet not expected\n";
                 }
             }
             else
@@ -327,114 +381,84 @@ isGood(
 }
 
 void
-updateServerConnection(
-    ConnManState & cmstate,
-    Connection & connection
-)
-{
-    Packet packet;
-    bool magicmatch = false;
-
-    /*
-    Grab the first packet from this connections' queue.
-    sanity check the packet. 
-    */
-
-    //if (connection.packets.size() > 0)
-    //{
-    //    packet = &connection.packets.front();
-    //    connection.packets.pop();
-    //    assert(packet->buffersize > 0);
-
-    //    if (!magicMatch(*packet) || !sizeValid(*packet))
-    //    {
-    //        packet = nullptr;
-    //    }
-    //    //else
-    //    //{
-    //    //    if (wantsAck(*packet))
-    //    //    {
-
-    //    //    }
-    //    //}
-    //}
-
-    switch (connection.state)
-    {
-    case Connection::State::WAITFORIDENTIFY: {
-        // We are expecting Identify 
-        if (isGood(cmstate,connection, MESG::HEADER::Codes::I, packet))
-        {
-            ConnMan::processWaitForIdentify(cmstate, connection, packet);
-            std::cout << "Rx Identify.\n";
-        }
-
-
-        break;
-    }case Connection::State::SENDGRANT: {
-        // We need to send a Grant
-        ConnMan::processSendGrant(cmstate, connection);
-        std::cout << "Tx Grant.\n";
-        break;
-    }case Connection::State::SENDDENY: {
-        // We need to send a Deny
-        ConnMan::processSendDeny(cmstate, connection);
-        std::cout << "Tx Deny.\n";
-        break;
-    }case Connection::State::WAITFORREADY: {
-        // We are waiting for a Ready
-        if (isGood(cmstate, connection, MESG::HEADER::Codes::R, packet))
-        {
-            ConnMan::processWaitForReady(cmstate, connection, packet);
-            std::cout << "Rx Ready.\n";
-        }
-        break;
-    }case Connection::State::WAITFORSTART: {
-        // This is looking for an internal event
-        ConnMan::processWaitForStart(cmstate, connection);
-        break;
-    }case Connection::State::SENDSTART: {
-        // We need to send a Start
-        ConnMan::processSendStart(cmstate, connection);
-        std::cout << "Tx Start.\n";
-        break;
-    }case Connection::State::GENERAL: {
-        // We are waiting for an Update
-        if (isGood(cmstate, connection, MESG::HEADER::Codes::U, packet))
-        {
-            ConnMan::processGaming(cmstate, connection, packet);
-            std::cout << "Rx Update.\n";
-        }
-
-        break;
-    }case Connection::State::SENDACK: {
-        break;
-    }case Connection::State::WAITFORACK: {
-        break;
-    }default:
-        break;
-    }
-}
-
-
-void
 ConnMan::updateServer(
-    ConnManState & state,
+    ConnManState & cmstate,
     uint32_t ms_elapsed
 )
 {
 
-    state.timeticks += ms_elapsed;
+    cmstate.timeticks += ms_elapsed;
 
-    if (state.timeticks > 90)
+    if (cmstate.timeticks > 90)
     {
-        state.timeticks = 0;
-        state.cmmutex.lock();
-        for (int p = 0; p < state.connections.size(); p++)
+        cmstate.timeticks = 0;
+        cmstate.cmmutex.lock();
+        for (int p = 0; p < cmstate.connections.size(); p++)
         {
-            updateServerConnection(state, state.connections[p]);
+            Packet packet;
+            bool magicmatch = false;
+            Connection & connection = cmstate.connections[p];
+
+            switch (connection.state)
+            {
+            case Connection::State::WAITFORIDENTIFY: {
+                // We are expecting Identify 
+                if (isGood(cmstate, connection, MESG::HEADER::Codes::I, packet))
+                {
+                    ConnMan::processWaitForIdentify(cmstate, connection, packet);
+                    std::cout << "Rx Identify.\n";
+
+                    connection.packets.pop();
+                }
+                break;
+            }case Connection::State::SENDGRANT: {
+                // We need to send a Grant
+                ConnMan::processSendGrant(cmstate, connection);
+                std::cout << "Tx Grant.\n";
+                break;
+            }case Connection::State::SENDDENY: {
+                // We need to send a Deny
+                ConnMan::processSendDeny(cmstate, connection);
+                std::cout << "Tx Deny.\n";
+                break;
+            }case Connection::State::WAITFORREADY: {
+                // We are waiting for a Ready
+                if (isGood(cmstate, connection, MESG::HEADER::Codes::R, packet))
+                {
+                    ConnMan::processWaitForReady(cmstate, connection, packet);
+                    std::cout << "Rx Ready.\n";
+
+                    connection.packets.pop();
+                }
+                break;
+            }case Connection::State::WAITFORSTART: {
+                // This is looking for an internal event
+                ConnMan::processWaitForStart(cmstate, connection);
+                break;
+            }case Connection::State::SENDSTART: {
+                // We need to send a Start
+                ConnMan::processSendStart(cmstate, connection);
+                std::cout << "Tx Start.\n";
+                break;
+            }case Connection::State::GENERAL: {
+                // We are waiting for an Update
+                if (isGood(cmstate, connection, MESG::HEADER::Codes::U, packet))
+                {
+                    ConnMan::processGaming(cmstate, connection, packet);
+                    std::cout << "Rx Update.\n";
+
+                    connection.packets.pop();
+                }
+                break;
+            }case Connection::State::SENDACK: {
+                break;
+            }case Connection::State::WAITFORACK: {
+                break;
+            }default:
+                break;
+            }
         }
-        state.cmmutex.unlock();
+        cmstate.cmmutex.unlock();
     }
 }
 
@@ -473,9 +497,18 @@ ConnMan::AddressAuthorized(
     return false;
 }
 
+uint64_t
+getConnectionId(
+    Packet & packet
+)
+{
+    MESG* RxMsg = (MESG*)packet.buffer;
+    return RxMsg->header.id;
+}
+
 void
 ConnMan::ConnManIOHandler(
-    void* state_,
+    void* cmstate_,
     Request* request,
     uint64_t id
 )
@@ -483,12 +516,12 @@ ConnMan::ConnManIOHandler(
 
     bali::Network::Result result(bali::Network::ResultType::SUCCESS);
     //IoHandlerContext* c = (IoHandlerContext*)cm->handlercontext;
-    ConnManState* state = (ConnManState*)state_;
+    ConnManState* cmstate = (ConnManState*)cmstate_;
     if (request->ioType == Request::IOType::READ)
     {
         // Debug Print buffer
         std::string payloadAscii((PCHAR)request->packet.buffer, request->packet.buffersize);
-        std::cout << "[IN][" << id << "][" << request->packet.buffersize << "]" << payloadAscii.c_str() << std::endl;
+        std::cout << "[Rx][" << id << "][" << request->packet.buffersize << "]" << payloadAscii.c_str() << std::endl;
 
         /*
             If we haven't seen this address before
@@ -497,34 +530,60 @@ ConnMan::ConnManIOHandler(
             enqueue packet.
         */
 
-        size_t index=0;
-
-        state->cmmutex.lock();
-        if (!ConnMan::AddressKnown(*state, &request->packet.address, &index))
+        cmstate->cmmutex.lock();
+        if (magicMatch(request->packet))
         {
-            Connection connection;
-            connection.id = InterlockedIncrement(&state->CurrentConnectionId);
-            connection.who = request->packet.address;
-            connection.state = Connection::State::WAITFORIDENTIFY;
+            if (sizeValid(request->packet))
+            {
+                if (isCode(request->packet, MESG::HEADER::Codes::I))
+                {
+                    Connection connection;
+                    connection.id = InterlockedIncrement(&cmstate->CurrentConnectionId);
+                    connection.who = request->packet.address;
+                    connection.state = Connection::State::WAITFORIDENTIFY;
 
-            state->connections.push_back(connection);
-            index = state->connections.size() - 1;
+                    cmstate->connections.push_back(connection);
+                    cmstate->connections.back().packets.push(request->packet);
+                    std::cout << "[New]";
+                }
+                else
+                {
+                    MESG* RxMsg = (MESG*)request->packet.buffer;
+                    uint64_t cid = RxMsg->header.id;
 
-            std::cout << "New Connection\n";
+                    for (auto & c : cmstate->connections)
+                    {
+                        if (cid == c.id)
+                        {
+                            c.packets.push(request->packet);
+                            std::cout << "[Existing]";
+                            break;
+                        }
+                    }
+                }
+            }
+            else
+            {
+                // Size does not meet expectations, given "request->header.code"
+                std::cout << "Rx Packet with incoherent Size." << std::endl;
+            }
         }
-
-        state->connections[index].packets.push(request->packet);
-        state->cmmutex.unlock();
+        else
+        {
+            // Magic MisMatch
+            std::cout << "Rx Packet with incoherent Magic." << std::endl;
+        }
+        cmstate->cmmutex.unlock();
 
         // Prepare read to perpetuate.
         // TODO: what happens when no more free requests?
-        Network::read(state->netstate);
+        Network::read(cmstate->netstate);
     }
     else if (request->ioType == Request::IOType::WRITE)
     {
         // Debug Print buffer
         std::string payloadAscii((PCHAR)request->packet.buffer, request->packet.buffersize);
-        std::cout << "[OUT][" << id << "][" << request->packet.buffersize << "]" << payloadAscii.c_str() << std::endl;
+        std::cout << "[Tx][" << id << "][" << request->packet.buffersize << "]" << payloadAscii.c_str() << std::endl;
     }
     return;
 }
