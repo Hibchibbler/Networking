@@ -18,32 +18,26 @@ struct IDENTIFY
 
 struct GRANT
 {
-    UINT8 id;
 };
 
 struct DENY
 {
-
 };
 
 struct READY
 {
-
 };
 
 struct START
 {
-
 };
 
 struct UPDATE
 {
-
 };
 
 struct LEAVE
 {
-
 };
 
 
@@ -59,11 +53,12 @@ struct MESG
         enum class Traits {
             ACK = 0
         };
-        char magic[8];
-        uint64_t code;
-        uint64_t traits;
-        uint64_t id;
-        uint64_t seq;
+        char magic[4];
+        uint32_t code;
+        uint32_t id;
+        uint32_t traits;
+        uint32_t seq;
+        uint32_t crc;
     }header;
 
     union{
@@ -264,7 +259,6 @@ public:
     sendStart(
         ConnManState & cmstate
     );
-
 
 };
 }

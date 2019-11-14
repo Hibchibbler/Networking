@@ -12,6 +12,8 @@ ConnMan::initialize(
     std::string gamepass
 )
 {
+    srand(1523791);
+
     cmstate.port = port;
     cmstate.numplayers = numplayers;
     cmstate.gamename = gamename;
@@ -58,7 +60,7 @@ ConnMan::sendStart(
         if (c.state == Connection::State::WAITFORSTART)
         {
             MESG* pMsg = (MESG*)startPacket.buffer;
-            startPacket.buffersize = sizeof(MESG);
+            startPacket.buffersize = sizeof(MESG);//+sizeof(START);//TODO plus size of START?
             memcpy(pMsg->header.magic, "ABCDEFGH", 8);
             pMsg->header.code = (uint64_t)MESG::HEADER::Codes::S;
             pMsg->header.seq = 0;
@@ -96,7 +98,7 @@ isCode(
 {
     bool ret = false;
     MESG* RxMsg = (MESG*)packet.buffer;
-    if (RxMsg->header.code == (uint64_t)code)
+    if (RxMsg->header.code == (uint32_t)code)
     {
         ret = true;
     }
@@ -112,11 +114,7 @@ magicMatch(
     if (packet.buffer[0] == 65 &&
         packet.buffer[1] == 66 &&
         packet.buffer[2] == 67 &&
-        packet.buffer[3] == 68 &&
-        packet.buffer[4] == 69 &&
-        packet.buffer[5] == 70 &&
-        packet.buffer[6] == 71 &&
-        packet.buffer[7] == 72)
+        packet.buffer[3] == 68)
     {
         ret = true;
     }
@@ -225,11 +223,14 @@ ConnMan::processSendGrant(
     // Send a Grant
     Packet packet;
     MESG* TxMsg = (MESG*)packet.buffer;
+
     packet.address = connection.who;
-    packet.buffersize = sizeof(MESG);
-    TxMsg->header.code = (uint8_t)(MESG::HEADER::Codes::G);
+    packet.buffersize = sizeof(MESG::HEADER) + sizeof(MESG::HEADER::Codes::G);
+    TxMsg->header.code = (uint32_t)(MESG::HEADER::Codes::G);
+    TxMsg->header.id = connection.id;
     TxMsg->header.traits = 0;
-    TxMsg->payload.grant.id = connection.id;
+    TxMsg->header.seq = 0;
+    TxMsg->header.crc = 0;
     Network::write(state.netstate, packet);
     connection.state = Connection::State::WAITFORREADY;
     return ret;
@@ -242,6 +243,18 @@ ConnMan::processSendDeny(
 )
 {
     bool ret = false;
+    // Send a Deny
+    Packet packet;
+    MESG* TxMsg = (MESG*)packet.buffer;
+
+    packet.address = connection.who;
+    packet.buffersize = sizeof(MESG::HEADER) + sizeof(MESG::HEADER::Codes::D);
+    TxMsg->header.code = (uint32_t)(MESG::HEADER::Codes::D);
+    TxMsg->header.id = 0;
+    TxMsg->header.traits = 0;
+    TxMsg->header.seq = 0;
+    TxMsg->header.crc = 0;
+    Network::write(state.netstate, packet);
     connection.state = Connection::State::WAITFORIDENTIFY;
     return ret;
 }
@@ -255,7 +268,7 @@ ConnMan::processWaitForReady(
 {
     bool ret = false;
     MESG* RxMsg = (MESG*)packet.buffer;
-    if (RxMsg->header.code == (uint8_t)(MESG::HEADER::Codes::R))
+    if (RxMsg->header.code == (uint32_t)(MESG::HEADER::Codes::R))
     {
         connection.state = Connection::State::WAITFORSTART;
         ret = true;
@@ -513,7 +526,6 @@ ConnMan::ConnManIOHandler(
     uint64_t id
 )
 {
-
     bali::Network::Result result(bali::Network::ResultType::SUCCESS);
     //IoHandlerContext* c = (IoHandlerContext*)cm->handlercontext;
     ConnManState* cmstate = (ConnManState*)cmstate_;
@@ -524,9 +536,7 @@ ConnMan::ConnManIOHandler(
         std::cout << "[Rx][" << id << "][" << request->packet.buffersize << "]" << payloadAscii.c_str() << std::endl;
 
         /*
-            If we haven't seen this address before
-            create a connection, and set state to unknown.
-
+            If we recieve an Identify packet
             enqueue packet.
         */
 
@@ -538,7 +548,7 @@ ConnMan::ConnManIOHandler(
                 if (isCode(request->packet, MESG::HEADER::Codes::I))
                 {
                     Connection connection;
-                    connection.id = InterlockedIncrement(&cmstate->CurrentConnectionId);
+                    connection.id = rand() % 255;//InterlockedIncrement(&cmstate->CurrentConnectionId);
                     connection.who = request->packet.address;
                     connection.state = Connection::State::WAITFORIDENTIFY;
 
