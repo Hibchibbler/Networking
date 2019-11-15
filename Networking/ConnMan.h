@@ -12,8 +12,9 @@ namespace bali
 
 struct IDENTIFY
 {
-    CHAR name[16];
-    CHAR pass[16];
+    CHAR playername[16];
+    CHAR gamename[16];
+    CHAR gamepass[16];
 };
 
 struct GRANT
@@ -40,6 +41,10 @@ struct LEAVE
 {
 };
 
+struct ACK
+{
+};
+
 
 
 struct MESG
@@ -47,7 +52,7 @@ struct MESG
     struct HEADER
     {
         enum class Codes {
-            I = 1, G, D, R, S, U, L
+            I = 1, G, D, R, S, U, L, A
         };
 
         enum class Traits {
@@ -69,6 +74,7 @@ struct MESG
         START    start;
         UPDATE   update;
         LEAVE    leave;
+        ACK      ack;
     }payload;
 };
 
@@ -94,8 +100,9 @@ public:
         WAITFORACK
     };
 
-    std::string         name;
-    std::string         pass;
+    std::string         playername;
+    std::string         gamename;
+    std::string         gamepass;
     State               state;
     State               retstate;
     uint64_t            id;
@@ -127,7 +134,7 @@ struct ConnManState
     Mutex                   cmmutex;
     Thread                  threadConnMan;
     std::vector<Connection> connections;
-    std::vector<Connection> unknowns;
+    std::vector<Packet>     packets;
 
 };
 /*
