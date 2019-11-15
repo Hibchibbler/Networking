@@ -89,6 +89,14 @@ public:
         std::string playername
     );
 
+    static
+    uint64_t
+    sendReadyTo(
+        ConnManState & cmstate,
+        Address to,
+        uint32_t id
+    );
+
 };
 }
 

@@ -372,6 +372,7 @@ ConnMan::ConnManIOHandler(
                         if (pConn->state == Connection::State::WAITFORGRANTDENY)
                         {
                             pConn->state = Connection::State::WAITFORREADY;
+                            pConn->id = GetConnectionId(request->packet);
                         }
                         else
                         {
@@ -508,4 +509,26 @@ ConnMan::ConnManIOHandler(
     }
     return;
 }
+
+uint64_t
+ConnMan::sendReadyTo(
+    ConnManState & cmstate,
+    Address to,
+    uint32_t id
+)
+{
+    Packet ipacket;
+    uint32_t traits = 0;
+
+    InitializePacket(ipacket,
+                     to,
+                     MESG::HEADER::Codes::R,
+                     id,
+                     traits);
+
+    Network::write(cmstate.netstate, ipacket);
+
+    return 0;
+}
+
 } // namespace bali
