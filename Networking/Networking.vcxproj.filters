@@ -24,6 +24,9 @@
     <ClInclude Include="ConnMan.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="ConnManUtil.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp">
@@ -33,6 +36,9 @@
       <Filter>Header Files</Filter>
     </ClCompile>
     <ClCompile Include="ConnMan.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ConnManUtil.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

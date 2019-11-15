@@ -38,7 +38,7 @@ int main()
 {
     ConnManState cmstate;
     uint32_t elapsed = 0;
-    uint32_t requiredNumberOfPlayers = 1;
+    uint32_t requiredNumberOfPlayers = 2;
     std::string gameName = "Bali";
     std::string gamePass = "Bear";
 
@@ -70,6 +70,7 @@ int main()
     if (!Abort)
     {
         ConnMan::sendStart(cmstate);
+
     }
     //
     // Ok, everyone should be Started.

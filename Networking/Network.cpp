@@ -338,6 +338,7 @@ void* Network::WorkerThread(NetworkState* netstate)
     LPWSAOVERLAPPED pOver;
 
     uint64_t id = InterlockedIncrement(&netstate->threadidmax);
+    srand(id);
 
     bool done = false;
     while (!done)

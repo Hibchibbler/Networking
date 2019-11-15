@@ -1,142 +1,15 @@
 #ifndef CONNMAN_H_
 #define CONNMAN_H_
 
-#include "Network.h"
+#include "ConnManUtil.h"
 //#include <WinSock2.h>
 //#include <windows.h>
-#include <queue>
+
 #include <chrono>
 
 namespace bali
 {
 
-struct IDENTIFY
-{
-    CHAR playername[16];
-    CHAR gamename[16];
-    CHAR gamepass[16];
-};
-
-struct GRANT
-{
-};
-
-struct DENY
-{
-};
-
-struct READY
-{
-};
-
-struct START
-{
-};
-
-struct UPDATE
-{
-};
-
-struct LEAVE
-{
-};
-
-struct ACK
-{
-};
-
-
-
-struct MESG
-{
-    struct HEADER
-    {
-        enum class Codes {
-            I = 1, G, D, R, S, U, L, A
-        };
-
-        enum class Traits {
-            ACK = 0
-        };
-        char magic[4];
-        uint32_t code;
-        uint32_t id;
-        uint32_t traits;
-        uint32_t seq;
-        uint32_t crc;
-    }header;
-
-    union{
-        IDENTIFY identify;
-        GRANT    grant;
-        DENY     deny;
-        READY    ready;
-        START    start;
-        UPDATE   update;
-        LEAVE    leave;
-        ACK      ack;
-    }payload;
-};
-
-class Connection
-{
-public:
-/*
-    Transitions requiring a Packet:
-        Unknown -> SendGrant | SendDeny [I]
-        WaitForReady -> Ready           [R]
-        Started -> Started              [U]
-
-*/
-    enum class State {
-        WAITFORIDENTIFY,
-        SENDGRANT,
-        SENDDENY,
-        WAITFORREADY,
-        WAITFORSTART,
-        SENDSTART,
-        GENERAL,
-        SENDACK,
-        WAITFORACK
-    };
-
-    std::string         playername;
-    std::string         gamename;
-    std::string         gamepass;
-    State               state;
-    State               retstate;
-    uint64_t            id;
-    Address             who;
-
-    std::queue<Packet> packets;
-};
-
-class IoHandlerContext
-{
-public:
-
-};
-
-
-
-struct ConnManState
-{
-    uint64_t                CurrentConnectionId;
-    uint64_t                timeticks;
-    uint32_t                done;
-
-    uint32_t                port;
-    uint32_t                numplayers;
-    std::string             gamename;
-    std::string             gamepass;
-
-    NetworkState            netstate;
-    Mutex                   cmmutex;
-    Thread                  threadConnMan;
-    std::vector<Connection> connections;
-    std::vector<Packet>     packets;
-
-};
 /*
 "ConnMan" is composed of "Network".
 ConnMan tracks incoming
