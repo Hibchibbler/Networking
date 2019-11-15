@@ -2,10 +2,6 @@
 #define CONNMAN_H_
 
 #include "ConnManUtil.h"
-//#include <WinSock2.h>
-//#include <windows.h>
-
-#include <chrono>
 
 namespace bali
 {
@@ -52,80 +48,6 @@ public:
         void* state,
         Request* request,
         uint64_t id
-    );
-
-    static
-    bool
-    AddressKnown(
-        ConnManState & cmstate,
-        Address* address,
-        size_t* index
-    );
-
-    static
-    bool
-    AddressAuthorized(
-        ConnManState & cmstate,
-        Address* address
-    );
-
-    static
-    bool
-    NameExists(
-        ConnManState & cmstate,
-        std::string name
-    );
-
-    static
-    bool
-    processWaitForIdentify(
-        ConnManState & cmstate,
-        Connection & connection,
-        Packet & packet
-    );
-
-    static
-    bool
-    processSendGrant(
-        ConnManState & cmstate,
-        Connection & connection
-    );
-
-    static
-    bool
-    processSendDeny(
-        ConnManState & cmstate,
-        Connection & connection
-    );
-
-    static
-    bool
-    processWaitForReady(
-        ConnManState & cmstate,
-        Connection & connection,
-        Packet & packet
-    );
-
-    static
-    bool
-    processGaming(
-        ConnManState & cmstate,
-        Connection & connection,
-        Packet & packet
-    );
-
-    static
-    bool
-    processSendStart(
-        ConnManState & cmstate,
-        Connection & connection
-    );
-
-    static
-    bool
-    processWaitForStart(
-        ConnManState & cmstate,
-        Connection & connection
     );
 
     static

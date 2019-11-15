@@ -114,7 +114,7 @@ public:
     std::string         gamename;
     std::string         gamepass;
     State               state;
-    uint64_t            id;
+    uint32_t            id;
     Address             who;
 
     std::queue<Packet> packets;
