@@ -62,6 +62,33 @@ public:
         ConnManState & cmstate
     );
 
+    static
+    uint64_t
+    sendIdentifyTo(
+        ConnManState & cmstate,
+        Address to,
+        std::string playername,
+        std::string gamename,
+        std::string gamepass
+    );
+
+    static
+    uint64_t
+    sendGrantTo(
+        ConnManState & cmstate,
+        Address to,
+        uint32_t id,
+        std::string playername
+    );
+
+    static
+    uint64_t
+    sendDenyTo(
+        ConnManState & cmstate,
+        Address to,
+        std::string playername
+    );
+
 };
 }
 

@@ -265,4 +265,36 @@ PrintMsgHeader(
     std::cout << "\tCrc:    " << std::hex << pDbgMsg->header.crc << "\n";
 }
 
+
+bool
+GetConnection(
+    std::vector<Connection> & connections,
+    std::string playername,
+    Connection** connection
+)
+{
+    bool found = false;
+    //for (auto & c : connections)
+    for (auto i = 0; i < connections.size(); i++)
+    {
+        if (playername == connections[i].playername)
+        {
+            *connection = &connections[i];
+            found = true;
+            break;
+        }
+    }
+    return found;
+}
+
+std::string
+GetPlayerName(
+    Packet & packet
+)
+{
+    MESG* pMsg = (MESG*)packet.buffer;
+    return std::string(pMsg->payload.grant.playername,
+                       strlen(pMsg->payload.grant.playername));
+}
+
 } // end namespace bali

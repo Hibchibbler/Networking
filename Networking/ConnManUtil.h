@@ -20,6 +20,7 @@ struct GRANT
 
 struct DENY
 {
+    CHAR playername[16];
 };
 
 struct READY
@@ -103,9 +104,11 @@ public:
 
     */
     enum class State {
+        INIT,
         WAITFORIDENTIFY,
         WAITFORREADY,
         WAITFORSTART,
+        WAITFORGRANTDENY,
         GENERAL,
         SENDACK,
         WAITFORACK
@@ -187,6 +190,18 @@ GetConnection(
     Connection** connection
 );
 
+
+bool
+GetConnection(
+    std::vector<Connection> & connections,
+    std::string playername,
+    Connection** connection
+);
+
+std::string
+GetPlayerName(
+    Packet & packet
+);
 
 uint32_t
 GetConnectionId(

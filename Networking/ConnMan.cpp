@@ -134,6 +134,110 @@ ConnMan::cleanup(
     state.cmmutex.destroy();
 }
 
+uint64_t
+ConnMan::sendIdentifyTo(
+    ConnManState & cmstate,
+    Address to,
+    std::string playername,
+    std::string gamename,
+    std::string gamepass
+)
+{
+    Packet ipacket;
+    uint32_t traits = 0;
+
+    InitializePacket(ipacket,
+                        to,
+                        MESG::HEADER::Codes::I,
+                        0,
+                        traits);
+
+    MESG* pMsg = (MESG*)ipacket.buffer;
+    memcpy(pMsg->payload.identify.playername,
+            playername.c_str(),
+            playername.size());
+
+    memcpy(pMsg->payload.identify.gamename,
+            gamename.c_str(),
+            gamename.size());
+
+    memcpy(pMsg->payload.identify.gamepass,
+            gamepass.c_str(),
+            gamepass.size());
+
+    Network::write(cmstate.netstate, ipacket);
+
+    //
+// Grant
+// Create and insert a new connection, 
+// randomly generate id, then send a Grant.
+//
+    Connection connection;
+    connection.playername = playername;
+    connection.gamename = gamename;
+    connection.gamepass = gamepass;
+
+    connection.id = 0;
+
+    connection.state = Connection::State::WAITFORGRANTDENY;
+    cmstate.connections.push_back(connection);
+    return 0;
+}
+
+uint64_t
+ConnMan::sendGrantTo(
+    ConnManState & cmstate,
+    Address to,
+    uint32_t id,
+    std::string playername
+)
+{
+    Packet ipacket;
+    uint32_t traits = 0;
+
+    InitializePacket(ipacket,
+                     to,
+                     MESG::HEADER::Codes::G,
+                     id,
+                     traits);
+
+    MESG* pMsg = (MESG*)ipacket.buffer;
+
+    memcpy(pMsg->payload.identify.playername,
+           playername.c_str(),
+           playername.size());
+
+    Network::write(cmstate.netstate, ipacket);
+
+    return 0;
+}
+
+uint64_t
+ConnMan::sendDenyTo(
+    ConnManState & cmstate,
+    Address to,
+    std::string playername
+)
+{
+    Packet ipacket;
+    uint32_t traits = 0;
+
+    InitializePacket(ipacket,
+                     to,
+                     MESG::HEADER::Codes::D,
+                     0,
+                     traits);
+
+    MESG* pMsg = (MESG*)ipacket.buffer;
+
+    memcpy(pMsg->payload.identify.playername,
+           playername.c_str(),
+           playername.size());
+
+    Network::write(cmstate.netstate, ipacket);
+
+    return 0;
+}
 
 
 void
@@ -257,7 +361,29 @@ ConnMan::ConnManIOHandler(
                 }
                 else if (IsCode(request->packet, MESG::HEADER::Codes::G))
                 {
+                    bool ret;
+                    std::string playername;
+                    Connection * pConn = nullptr;
 
+                    playername = GetPlayerName(request->packet);
+                    ret = GetConnection(cmstate->connections, playername, &pConn);
+                    if (ret)
+                    {
+                        if (pConn->state == Connection::State::WAITFORGRANTDENY)
+                        {
+                            pConn->state = Connection::State::WAITFORREADY;
+                        }
+                        else
+                        {
+                            // Weird: We're not supposed to recieve U right now.
+                            std::cout << "Weird: We're not in WAITFORGRANTDENY, but received G.\n";
+                        }
+                    }
+                    else
+                    {
+                        // Problem: request->packet id is not known
+                        std::cout << "Problem: Grant packet id is not known\n";
+                    }
                 }
                 else if (IsCode(request->packet, MESG::HEADER::Codes::D))
                 {
@@ -280,19 +406,40 @@ ConnMan::ConnManIOHandler(
                         else
                         {
                             // Weird: We're not supposed to recieve U right now.
-                            std::cout << "Weird: We're not supposed to recieve R right now.\n";
+                            std::cout << "Weird: We're not in WAITFORREADY, but received R.\n";
                         }
                     }
                     else
                     {
                         // Problem: request->packet id is not known
-                        std::cout << "Problem: request->Rpacket id is not known\n";
+                        std::cout << "Problem: Ready packet id is not known\n";
                     }
-
                 }
                 else if (IsCode(request->packet, MESG::HEADER::Codes::S))
                 {
+                    bool ret;
+                    uint32_t c;
+                    Connection * pConn = nullptr;
 
+                    c = GetConnectionId(request->packet);
+                    ret = GetConnection(cmstate->connections, c, &pConn);
+                    if (ret)
+                    {
+                        if (pConn->state == Connection::State::WAITFORSTART)
+                        {
+                            pConn->state = Connection::State::GENERAL;
+                        }
+                        else
+                        {
+                            // Weird: We're not supposed to recieve U right now.
+                            std::cout << "Weird: We're not in WAITFORSTART, but received S.\n";
+                        }
+                    }
+                    else
+                    {
+                        // Problem: request->packet id is not known
+                        std::cout << "Problem: Start packet id is not known\n";
+                    }
                 }
                 else if(IsCode(request->packet, MESG::HEADER::Codes::U))
                 {
@@ -315,13 +462,13 @@ ConnMan::ConnManIOHandler(
                         else
                         {
                             // Weird: We're not supposed to recieve U right now.
-                            std::cout << "Weird: We're not supposed to recieve U right now.\n";
+                            std::cout << "Weird: We're not in GENERAL, but recieved G.\n";
                         }
                     }
                     else
                     {
                         // Problem: request->packet id is not known
-                        std::cout << "Problem: request->Upacket id is not known\n";
+                        std::cout << "Problem: Update packet id is not known\n";
                     }
                 }
 
