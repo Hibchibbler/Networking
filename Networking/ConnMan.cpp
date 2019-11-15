@@ -210,6 +210,8 @@ ConnMan::ConnManIOHandler(
                                                      MESG::HEADER::Codes::G,
                                                      connection.id,
                                                      0);
+                                    MESG* pMsg = (MESG*)packet.buffer;
+                                    memcpy(pMsg->payload.grant.playername, connection.playername.c_str(), connection.playername.size());
 
                                     Network::write(cmstate->netstate, packet);
                                 }

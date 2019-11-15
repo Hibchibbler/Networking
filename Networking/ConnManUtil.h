@@ -15,6 +15,7 @@ struct IDENTIFY
 
 struct GRANT
 {
+    CHAR playername[16];
 };
 
 struct DENY

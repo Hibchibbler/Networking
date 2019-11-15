@@ -80,6 +80,11 @@ int main()
     {
         Sleep(30);
         ConnMan::updateServer(cmstate, 30);
+
+        for (auto & c : cmstate.connections)
+        {
+            
+        }
     }
 
     std::cout << "Cleaning up...\n";
