@@ -337,9 +337,7 @@ void* Network::WorkerThread(NetworkState* netstate)
     ULONG_PTR ckey = COMPLETION_KEY_UNKNOWN;
     LPWSAOVERLAPPED pOver;
 
-    uint64_t id = InterlockedIncrement(&netstate->threadidmax);
-    srand(id);
-
+    uint64_t tid = InterlockedIncrement(&netstate->threadidmax);
     bool done = false;
     while (!done)
     {
@@ -356,7 +354,7 @@ void* Network::WorkerThread(NetworkState* netstate)
                     request->packet.buffersize = bytesTrans;
 
                     // Notify the user
-                    netstate->ioHandler(netstate->handlercontext, request, id);
+                    netstate->ioHandler(netstate->handlercontext, request, tid);
 
                     // Relinquish this overlapped structure
                     netstate->socket.overlapPool.release(request->index);

@@ -3,9 +3,15 @@
 
 #include "Network.h"
 #include <queue>
+#include <list>
+#include <chrono>
 
 namespace bali
 {
+
+typedef std::chrono::high_resolution_clock clock;
+typedef std::chrono::duration<float, std::milli> duration;
+
 struct IDENTIFY
 {
     CHAR playername[16];
@@ -33,6 +39,7 @@ struct START
 
 struct UPDATE
 {
+    uint64_t blargh;
 };
 
 struct LEAVE
@@ -120,6 +127,11 @@ public:
     State               state;
     uint32_t            id;
     Address             who;
+
+    clock::time_point   checkintime;
+    clock::time_point   starttime;
+    clock::time_point   endtime;
+    std::list<duration> pingtimes;
 
     std::queue<Packet> packets;
 };

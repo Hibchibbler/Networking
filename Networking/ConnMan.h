@@ -97,6 +97,31 @@ public:
         uint32_t id
     );
 
+    static
+    uint64_t
+    sendUpdateTo(
+        ConnManState & cmstate,
+        Address to,
+        uint32_t id,
+        UPDATE & update
+    );
+
+    static
+    uint64_t
+    sendPingTo(
+        ConnManState & cmstate,
+        Address to,
+        uint32_t id
+    );
+
+    static
+    uint64_t
+    sendPongTo(
+        ConnManState & cmstate,
+        Address to,
+        uint32_t id
+    );
+
 };
 }
 

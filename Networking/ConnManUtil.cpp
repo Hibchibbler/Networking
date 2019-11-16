@@ -137,6 +137,20 @@ IsSizeValid(
             ret = true;
         }
     }
+    else if (RxMsg->header.code == (uint64_t)(MESG::HEADER::Codes::PING))
+    {
+        if (packet.buffersize >= sizeof(PING))
+        {
+            ret = true;
+        }
+    }
+    else if (RxMsg->header.code == (uint64_t)(MESG::HEADER::Codes::PONG))
+    {
+        if (packet.buffersize >= sizeof(PING))
+        {
+            ret = true;
+        }
+    }
     return ret;
 }
 
@@ -254,15 +268,37 @@ PrintMsgHeader(
     if (rx){std::cout << "[Rx]\n";}
     else{std::cout << "[Tx]\n";}
 
-    std::cout << "\tMagic:  " << std::hex << (uint8_t)pDbgMsg->header.magic[0]
+    std::cout << "  Magic:  " << std::hex << (uint8_t)pDbgMsg->header.magic[0]
                             << std::hex << (uint8_t)pDbgMsg->header.magic[1]
                             << std::hex << (uint8_t)pDbgMsg->header.magic[2]
                             << std::hex << (uint8_t)pDbgMsg->header.magic[3] << "\n";
-    std::cout << "\tCode:   " << std::hex << pDbgMsg->header.code << "\n";
-    std::cout << "\tId:     " << std::hex << pDbgMsg->header.id << "\n";
-    std::cout << "\tTraits: " << std::hex << pDbgMsg->header.traits << "\n";
-    std::cout << "\tSeq:    " << std::hex << pDbgMsg->header.seq << "\n";
-    std::cout << "\tCrc:    " << std::hex << pDbgMsg->header.crc << "\n";
+
+    switch (pDbgMsg->header.code)
+    {
+        case (uint32_t)MESG::HEADER::Codes::I:
+            std::cout << "  Code: Identify\n";
+            break;
+        case (uint32_t)MESG::HEADER::Codes::G:
+            std::cout << "  Code: Grant\n";
+            break;
+        case (uint32_t)MESG::HEADER::Codes::D:
+            std::cout << "  Code: Deny\n";
+            break;
+        case (uint32_t)MESG::HEADER::Codes::R:
+            std::cout << "  Code: Ready\n";
+            break;
+        case (uint32_t)MESG::HEADER::Codes::S:
+            std::cout << "  Code: Start\n";
+            break;
+        case (uint32_t)MESG::HEADER::Codes::U:
+            std::cout << "  Code: Update\n";
+            break;
+    }
+    //std::cout << "\tCode:   " << std::hex << pDbgMsg->header.code << "\n";
+    std::cout << "  Id:     " << std::hex << pDbgMsg->header.id << "\n";
+    std::cout << "  Traits: " << std::hex << pDbgMsg->header.traits << "\n";
+    std::cout << "  Seq:    " << std::hex << pDbgMsg->header.seq << "\n";
+    std::cout << "  Crc:    " << std::hex << pDbgMsg->header.crc << "\n";
 }
 
 
