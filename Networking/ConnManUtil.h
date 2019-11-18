@@ -1,6 +1,9 @@
 #ifndef CONNMANUTIL_H_
 #define CONNMANUTIL_H_
 
+#define _CRT_SECURE_NO_WARNINGS
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
+
 #include "Network.h"
 #include <queue>
 #include <list>
@@ -71,7 +74,7 @@ struct MESG
     struct HEADER
     {
         enum class Codes {
-            I = 1, G, D, R, S, U, L, A, LU, PING,PONG
+            Identify = 1, Grant, Deny, Ready, Start, General, Leave, Ack, LobbyUpdate, PING,PONG
         };
 
         enum class Traits {
@@ -86,13 +89,13 @@ struct MESG
     }header;
 
     union {
-        IDENTIFY    identify;
-        GRANT       grant;
-        DENY        deny;
-        READY       ready;
-        START       start;
-        UPDATE      update;
-        LEAVE       leave;
+        IDENTIFY    identify;   // Client Rx
+        GRANT       grant;      // Server Rx
+        DENY        deny;       // Server Rx
+        READY       ready;      // Client Rx
+        START       start;      // Server Rx
+        UPDATE      update;     // Client Rx & Server Rx
+        LEAVE       leave;      // Client Rx
         ACK         ack;
         LOBBYUPDATE lobbyupdate;
         PING        ping;
@@ -103,27 +106,23 @@ struct MESG
 class Connection
 {
 public:
-    /*
-    Transitions requiring a Packet:
-    Unknown -> SendGrant | SendDeny [I]
-    WaitForReady -> Ready           [R]
-    Started -> Started              [U]
 
-    */
+    enum class ConnectionType {
+        CLIENT,
+        SERVER
+    };
     enum class State {
-        INIT,
-        WAITFORIDENTIFY,
-        WAITFORREADY,
-        WAITFORSTART,
-        WAITFORGRANTDENY,
-        GENERAL,
+        WAITFORGRANTDENY,   // Client
+        GRANTED,            // Client
+        DENIED,             // Client
+        WAITFORREADY,       // Client/Server
+        WAITFORSTART,       // Client/Server
+        GENERAL,            // Connection Established
         SENDACK,
         WAITFORACK
     };
 
     std::string         playername;
-    std::string         gamename;
-    std::string         gamepass;
     State               state;
     uint32_t            id;
     Address             who;
@@ -132,12 +131,13 @@ public:
     clock::time_point   starttime;
     clock::time_point   endtime;
     std::list<duration> pingtimes;
-
-    std::queue<Packet> packets;
 };
 
 struct ConnManState
 {
+    typedef void(*OnEvent)(void*);
+    typedef void(*OnUpdate)(void*);
+
     uint64_t                CurrentConnectionId;
     uint64_t                timeticks;
     uint32_t                done;
@@ -151,8 +151,10 @@ struct ConnManState
     Mutex                   cmmutex;
     Thread                  threadConnMan;
     std::vector<Connection> connections;
+    Connection              clientconnection;
     std::vector<Packet>     packets;
-
+    OnEvent                 onevent;
+    OnUpdate                onupdate;
 };
 
 void
@@ -220,6 +222,16 @@ GetConnectionId(
     Packet & packet
 );
 
+std::string
+GetGameName(
+    Packet & packet
+);
+
+std::string
+GetGamePass(
+    Packet & packet
+);
+
 bool
 IsExpectsAck(
     Packet & packet
@@ -237,6 +249,18 @@ PrintMsgHeader(
     bool rx
 );
 
+void
+PrintfMsg(
+    char* format,
+    ...
+);
+
+
+Address
+CreateAddress(
+    uint32_t port,
+    const char* szIpv4
+);
 
 } // end namespace bali
 

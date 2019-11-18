@@ -17,13 +17,14 @@ SizeofPayload(
 )
 {
     uint32_t payloadSize = 0;
-    if (code == MESG::HEADER::Codes::I) { payloadSize += sizeof(IDENTIFY); }
-    if (code == MESG::HEADER::Codes::G) { payloadSize += sizeof(GRANT); }
-    if (code == MESG::HEADER::Codes::D) { payloadSize += sizeof(DENY); }
-    if (code == MESG::HEADER::Codes::R) { payloadSize += sizeof(READY); }
-    if (code == MESG::HEADER::Codes::S) { payloadSize += sizeof(START); }
-    if (code == MESG::HEADER::Codes::U) { payloadSize += sizeof(UPDATE); }
-    if (code == MESG::HEADER::Codes::L) { payloadSize += sizeof(LEAVE); }
+    if (code == MESG::HEADER::Codes::Identify) { payloadSize += sizeof(IDENTIFY); }
+    if (code == MESG::HEADER::Codes::Grant) { payloadSize += sizeof(GRANT); }
+    if (code == MESG::HEADER::Codes::Deny) { payloadSize += sizeof(DENY); }
+    if (code == MESG::HEADER::Codes::Ready) { payloadSize += sizeof(READY); }
+    if (code == MESG::HEADER::Codes::Start) { payloadSize += sizeof(START); }
+    if (code == MESG::HEADER::Codes::General) { payloadSize += sizeof(UPDATE); }
+    if (code == MESG::HEADER::Codes::Leave) { payloadSize += sizeof(LEAVE); }
+    if (code == MESG::HEADER::Codes::LobbyUpdate) { payloadSize += sizeof(LOBBYUPDATE); }
     return payloadSize;
 }
 
@@ -86,71 +87,15 @@ IsSizeValid(
     Packet & packet
 )
 {
+    
     bool ret = false;
     MESG* RxMsg = (MESG*)packet.buffer;
-    if (RxMsg->header.code == (uint64_t)(MESG::HEADER::Codes::I))
+
+    if (packet.buffersize >= sizeof(MESG::HEADER) + SizeofPayload((MESG::HEADER::Codes)RxMsg->header.code))
     {
-        if (packet.buffersize >= sizeof(IDENTIFY))
-        {
-            ret = true;
-        }
+        ret = true;
     }
-    else if (RxMsg->header.code == (uint64_t)(MESG::HEADER::Codes::G))
-    {
-        if (packet.buffersize >= sizeof(GRANT))
-        {
-            ret = true;
-        }
-    }
-    else  if (RxMsg->header.code == (uint64_t)(MESG::HEADER::Codes::D))
-    {
-        if (packet.buffersize >= sizeof(DENY))
-        {
-            ret = true;
-        }
-    }
-    else  if (RxMsg->header.code == (uint64_t)(MESG::HEADER::Codes::R))
-    {
-        if (packet.buffersize >= sizeof(READY))
-        {
-            ret = true;
-        }
-    }
-    else if (RxMsg->header.code == (uint64_t)(MESG::HEADER::Codes::S))
-    {
-        if (packet.buffersize >= sizeof(START))
-        {
-            ret = true;
-        }
-    }
-    else if (RxMsg->header.code == (uint64_t)(MESG::HEADER::Codes::U))
-    {
-        if (packet.buffersize >= sizeof(UPDATE))
-        {
-            ret = true;
-        }
-    }
-    else if (RxMsg->header.code == (uint64_t)(MESG::HEADER::Codes::L))
-    {
-        if (packet.buffersize >= sizeof(LEAVE))
-        {
-            ret = true;
-        }
-    }
-    else if (RxMsg->header.code == (uint64_t)(MESG::HEADER::Codes::PING))
-    {
-        if (packet.buffersize >= sizeof(PING))
-        {
-            ret = true;
-        }
-    }
-    else if (RxMsg->header.code == (uint64_t)(MESG::HEADER::Codes::PONG))
-    {
-        if (packet.buffersize >= sizeof(PING))
-        {
-            ret = true;
-        }
-    }
+  
     return ret;
 }
 
@@ -275,23 +220,26 @@ PrintMsgHeader(
 
     switch (pDbgMsg->header.code)
     {
-        case (uint32_t)MESG::HEADER::Codes::I:
+        case (uint32_t)MESG::HEADER::Codes::Identify:
             std::cout << "  Code: Identify\n";
             break;
-        case (uint32_t)MESG::HEADER::Codes::G:
+        case (uint32_t)MESG::HEADER::Codes::Grant:
             std::cout << "  Code: Grant\n";
             break;
-        case (uint32_t)MESG::HEADER::Codes::D:
+        case (uint32_t)MESG::HEADER::Codes::Deny:
             std::cout << "  Code: Deny\n";
             break;
-        case (uint32_t)MESG::HEADER::Codes::R:
+        case (uint32_t)MESG::HEADER::Codes::Ready:
             std::cout << "  Code: Ready\n";
             break;
-        case (uint32_t)MESG::HEADER::Codes::S:
+        case (uint32_t)MESG::HEADER::Codes::Start:
             std::cout << "  Code: Start\n";
             break;
-        case (uint32_t)MESG::HEADER::Codes::U:
+        case (uint32_t)MESG::HEADER::Codes::General:
             std::cout << "  Code: Update\n";
+            break;
+        default:
+            std::cout << "  Code: Something or nother\n";
             break;
     }
     //std::cout << "\tCode:   " << std::hex << pDbgMsg->header.code << "\n";
@@ -332,5 +280,54 @@ GetPlayerName(
     return std::string(pMsg->payload.grant.playername,
                        strlen(pMsg->payload.grant.playername));
 }
+
+void
+PrintfMsg(
+    char* szFormat,
+    ...
+)
+{
+    char buffer[1024];
+    va_list pArgList;
+    va_start (pArgList, szFormat);
+    vsprintf(buffer, szFormat, pArgList);
+    va_end(pArgList);
+
+    std::cout << buffer << std::endl;
+}
+
+Address
+CreateAddress(
+    uint32_t port,
+    const char* szIpv4
+)
+{
+    Address address;
+    address.addr.ss_family = AF_INET;
+    ((sockaddr_in*)&address.addr)->sin_port = htons(port);
+    ((sockaddr_in*)&address.addr)->sin_addr.S_un.S_addr = inet_addr(szIpv4);
+    return address;
+}
+
+std::string
+GetGameName(
+    Packet & packet
+)
+{
+    MESG* pMsg = (MESG*)packet.buffer;
+    return std::string(pMsg->payload.identify.gamename,
+                       strlen(pMsg->payload.identify.gamename));
+}
+
+std::string
+GetGamePass(
+    Packet & packet
+)
+{
+    MESG* pMsg = (MESG*)packet.buffer;
+    return std::string(pMsg->payload.identify.gamepass,
+                       strlen(pMsg->payload.identify.gamepass));
+}
+
 
 } // end namespace bali

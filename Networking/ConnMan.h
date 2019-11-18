@@ -26,7 +26,9 @@ public:
         uint32_t port,
         uint32_t numplayers,
         std::string gamename,
-        std::string gamepass
+        std::string gamepass,
+        ConnManState::OnEvent onevent,
+        ConnManState::OnUpdate onupdate
     );
 
     static
