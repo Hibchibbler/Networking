@@ -135,7 +135,7 @@ public:
 
 struct ConnManState
 {
-    typedef void(*OnEvent)(void*);
+    typedef void(*OnEvent)(void*, MESG* Msg);
     typedef void(*OnUpdate)(void*);
 
     uint64_t                CurrentConnectionId;

@@ -105,7 +105,7 @@ ConnMan::updateServer(
             MESG* pMsg = (MESG*)packet.buffer;
             if (GetConnection(cmstate.connections, pMsg->header.id, &connection))
             {
-                cmstate.onevent((void*)&cmstate);
+                cmstate.onevent((void*)&cmstate, pMsg);
             }
             else
             {
