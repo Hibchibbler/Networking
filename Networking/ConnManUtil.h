@@ -7,6 +7,7 @@
 #include "Network.h"
 #include <queue>
 #include <list>
+#include <map>
 #include <chrono>
 
 namespace bali
@@ -32,34 +33,34 @@ struct DENY
     CHAR playername[16];
 };
 
-struct READY
-{
-};
+//struct READY
+//{
+//};
+//
+//struct START
+//{
+//};
 
-struct START
-{
-};
-
-struct UPDATE
+struct GENERAL
 {
     uint64_t blargh;
 };
 
-struct LEAVE
-{
-};
+//struct LEAVE
+//{
+//};
 
 struct ACK
 {
 };
 
-struct PING
-{
-};
-
-struct PONG
-{
-};
+//struct PING
+//{
+//};
+//
+//struct PONG
+//{
+//};
 
 struct LOBBYUPDATE
 {
@@ -74,7 +75,11 @@ struct MESG
     struct HEADER
     {
         enum class Codes {
-            Identify = 1, Grant, Deny, Ready, Start, General, Leave, Ack, LobbyUpdate, PING,PONG
+            Identify,
+            Grant,
+            Deny,
+            Ack,
+            General
         };
 
         enum class Traits {
@@ -92,14 +97,9 @@ struct MESG
         IDENTIFY    identify;   // Client Rx
         GRANT       grant;      // Server Rx
         DENY        deny;       // Server Rx
-        READY       ready;      // Client Rx
-        START       start;      // Server Rx
-        UPDATE      update;     // Client Rx & Server Rx
-        LEAVE       leave;      // Client Rx
         ACK         ack;
-        LOBBYUPDATE lobbyupdate;
-        PING        ping;
-        PONG        poing;
+        GENERAL     general;     // Client Rx & Server Rx
+
     }payload;
 };
 
@@ -108,25 +108,37 @@ class Connection
 public:
 
     enum class ConnectionType {
-        CLIENT,
-        SERVER
+        LOCAL,
+        REMOTE
     };
+    //enum class State {
+    //    WAITFORGRANTDENY,   // Client
+    //    GRANTED,            // Client
+    //    DENIED,             // Client
+    //    WAITFORREADY,       // Client/Server
+    //    WAITFORSTART,       // Client/Server
+    //    GENERAL,            // Connection Established
+    //    SENDACK,
+    //    WAITFORACK,
+    //    INVALID
+    //};
     enum class State {
-        WAITFORGRANTDENY,   // Client
-        GRANTED,            // Client
-        DENIED,             // Client
-        WAITFORREADY,       // Client/Server
-        WAITFORSTART,       // Client/Server
-        GENERAL,            // Connection Established
-        SENDACK,
-        WAITFORACK
+        IDLE,
+        WAITONACK,
+        ACKRECEIVED,
+        ACKNOTRECEIVED
+    };
+    enum class AuthLevel {
+        UNAUTH,
+        AUTH
     };
 
+    AuthLevel           level;
     std::string         playername;
     State               state;
     uint32_t            id;
     Address             who;
-
+    ConnectionType      conntype;
     clock::time_point   checkintime;
     clock::time_point   starttime;
     clock::time_point   endtime;
@@ -135,8 +147,11 @@ public:
 
 struct ConnManState
 {
-    typedef void(*OnEvent)(void*, MESG* Msg);
-    typedef void(*OnUpdate)(void*);
+    enum class OnEventType {
+        NEW,
+        MESSAGE
+    };
+    typedef void(*OnEvent)(void* oecontext, OnEventType t, Connection* conn, Packet* packet);
 
     uint64_t                CurrentConnectionId;
     uint64_t                timeticks;
@@ -144,18 +159,26 @@ struct ConnManState
 
     uint32_t                port;
     uint32_t                numplayers;
+    uint32_t                numreadyplayers;
     std::string             gamename;
     std::string             gamepass;
 
     NetworkState            netstate;
     Mutex                   cmmutex;
     Thread                  threadConnMan;
-    std::vector<Connection> connections;
+    std::list<Connection>   connections;
+    //std::map<uint32_t, Connection>   connmap;
     Connection              clientconnection;
-    std::vector<Packet>     packets;
+    std::queue<Packet>      packets;
     OnEvent                 onevent;
-    OnUpdate                onupdate;
+    void*                   oneventcontext;
 };
+
+bool
+RemoveConnectionByName(
+    std::list<Connection> & connections,
+    std::string playername
+);
 
 void
 AddMagic(
@@ -172,7 +195,8 @@ InitializePacket(
     Address & who,
     MESG::HEADER::Codes code,
     uint32_t id,
-    uint32_t traits
+    uint32_t traits,
+    uint32_t seq
 );
 
 bool
@@ -198,16 +222,16 @@ IsGood2(
 );
 
 bool
-GetConnection(
-    std::vector<Connection> & connections,
+GetConnectionById(
+    std::list<Connection> & connections,
     uint32_t id,
     Connection** connection
 );
 
 
 bool
-GetConnection(
-    std::vector<Connection> & connections,
+GetConnectionByName(
+    std::list<Connection> & connections,
     std::string playername,
     Connection** connection
 );
@@ -260,6 +284,11 @@ Address
 CreateAddress(
     uint32_t port,
     const char* szIpv4
+);
+
+MESG*
+GetMesg(
+    Packet & packet
 );
 
 } // end namespace bali

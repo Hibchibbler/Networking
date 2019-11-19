@@ -78,4 +78,236 @@ XY 00 00 00
 00 00 00 00 
 
 
+//////////////////////////////////////////
+                if (IsCode(request->packet, MESG::HEADER::Codes::Identify))
+                {
+                    // Rx'd an IDENTIFY packet.
+                    // Therefore, an ID hasn't been
+                    // generated yet - "Connection" not
+                    // established.
+                    if (cmstate.connections.size() < cmstate.numplayers)
+                    {
+                        if (cmstate.gamename == GetGameName(request->packet))
+                        {
+                            if (cmstate.gamepass == GetGamePass(request->packet))
+                            {
+                                std::string pn = GetPlayerName(request->packet);
+                                if (IsPlayerNameAvailable(cmstate, pn))
+                                {
+                                    //
+                                    // Grant
+                                    // Create and insert a new connection, 
+                                    // randomly generate id, then send a Grant.
+                                    //
+                                    Connection connection;
+                                    connection.playername = pn;
+                                    connection.id = random_integer;
+                                    connection.who = request->packet.address;
+                                    connection.state = Connection::State::WAITFORREADY;
+                                    connection.checkintime = clock::now();
+                                    connection.conntype = Connection::ConnectionType::SERVER;
+
+                                    cmstate.connections.push_back(connection);
+
+                                    ConnMan::sendGrantTo(cmstate, connection.who, connection.id, connection.playername);
+                                }
+                                else
+                                {
+                                    // Deny - player name already exists
+                                    ConnMan::sendDenyTo(cmstate,
+                                                        request->packet.address,
+                                                        GetPlayerName(request->packet));
+                                    std::cout << "Deny: Player Name already exists\n";
+                                }
+                            }
+                            else
+                            {
+                                // Deny - password doesn't match
+                                ConnMan::sendDenyTo(cmstate,
+                                                    request->packet.address,
+                                                    GetPlayerName(request->packet));
+                                std::cout << "Deny: Password is bad\n";
+                            }
+                        }
+                        else
+                        {
+                            // Deny - Game name doesn't match
+                            ConnMan::sendDenyTo(cmstate,
+                                                request->packet.address,
+                                                GetPlayerName(request->packet));
+                            std::cout << "Deny: Game name is unknown\n";
+                        }
+                    }
+                }
+                else if (IsCode(request->packet, MESG::HEADER::Codes::Grant))
+                {
+                    bool ret;
+                    std::string playername;
+                    Connection * pConn = nullptr;
+                    //
+                    // If we're receiving a Grant,
+                    // then the associated connection has not yet been assigned an Id.
+                    // Therefore, we find the associated connection
+                    // by name
+                    //
+                    playername = GetPlayerName(request->packet);
+                    ret = GetConnectionByName(cmstate.connections, playername, &pConn);
+                    if (ret)
+                    {
+                        if (pConn->state == Connection::State::WAITFORGRANTDENY)
+                        {
+                            pConn->state = Connection::State::GRANTED;
+                            pConn->id = GetConnectionId(request->packet);
+                        }
+                        else
+                        {
+                            // Weird: We're not supposed to recieve U right now.
+                            std::cout << "Weird: We're not in WAITFORGRANTDENY, but received G.\n";
+                        }
+                    }
+                    else
+                    {
+                        // Problem: request->packet id is not known
+                        std::cout << "Problem: Grant packet id is not known\n";
+                    }
+                }
+                else if (IsCode(request->packet, MESG::HEADER::Codes::Deny))
+                {
+                    bool ret;
+                    std::string playername;
+                    Connection * pConn = nullptr;
+                    playername = GetPlayerName(request->packet);
+                    ret = GetConnectionByName(cmstate.connections, playername, &pConn);
+                    if (ret)
+                    {
+                        if (pConn->state == Connection::State::WAITFORGRANTDENY)
+                        {
+                            pConn->state = Connection::State::DENIED;
+                            pConn->id = GetConnectionId(request->packet);
+                        }
+                        else
+                        {
+                            // Weird: We're not supposed to recieve U right now.
+                            std::cout << "Weird: We're not in WAITFORGRANTDENY, but received D.\n";
+                        }
+                    }
+                    else
+                    {
+                        // Problem: request->packet id is not known
+                        std::cout << "Problem: Grant packet id is not known\n";
+                    }
+                }
+                else if (IsCode(request->packet, MESG::HEADER::Codes::Ready))
+                {
+                    bool ret;
+                    uint32_t c;
+                    Connection * pConn = nullptr;
+                    //
+                    // If we're receiving Ready, then
+                    // the associated Connection must already be
+                    // set up. Get Connection by Id
+                    //
+                    c = GetConnectionId(request->packet);
+                    ret = GetConnectionById(cmstate.connections, c, &pConn);
+                    if (ret)
+                    {
+                        if (pConn->state == Connection::State::WAITFORREADY)
+                        {
+                            pConn->state = Connection::State::WAITFORSTART;
+                        }
+                        else
+                        {
+                            // Weird: We're not supposed to recieve U right now.
+                            std::cout << "Weird: We're not in WAITFORREADY, but received R.\n";
+                        }
+                    }
+                    else
+                    {
+                        // Problem: request->packet id is not known
+                        std::cout << "Problem: Ready packet id is not known\n";
+                    }
+                }
+                else if (IsCode(request->packet, MESG::HEADER::Codes::Start))
+                {
+                    bool ret;
+                    uint32_t c;
+                    Connection * pConn = nullptr;
+                    //
+                    // If we're receiving Start, then
+                    // the associated Connection must already be
+                    // set up. Get Connection by Id
+                    //
+                    c = GetConnectionId(request->packet);
+                    ret = GetConnectionById(cmstate.connections, c, &pConn);
+                    if (ret)
+                    {
+                        if (pConn->state == Connection::State::WAITFORSTART)
+                        {
+                            pConn->state = Connection::State::GENERAL;
+                        }
+                        else
+                        {
+                            // Weird: We're not supposed to recieve U right now.
+                            std::cout << "Weird: We're not in WAITFORSTART, but received S.\n";
+                        }
+                    }
+                    else
+                    {
+                        // Problem: request->packet id is not known
+                        std::cout << "Problem: Start packet id is not known\n";
+                    }
+                }
+                else if(IsCode(request->packet, MESG::HEADER::Codes::General))
+                {
+                    bool ret;
+                    uint32_t c;
+                    Connection * pConn = nullptr;
+
+                    //
+                    // If we're receiving Updates, than
+                    // the associated Connection must already be
+                    // set up. Get Connection by Id
+                    //
+                    c = GetConnectionId(request->packet);
+                    ret = GetConnectionById(cmstate.connections, c, &pConn);
+                    if (ret)
+                    {
+                        if (pConn->state == Connection::State::GENERAL)
+                        {
+                            pConn->checkintime = clock::now();
+                            cmstate.packets.push_back(request->packet);
+                        }
+                        else
+                        {
+                            // Weird: We're not supposed to recieve U right now.
+                            std::cout << "Weird: We're not in GENERAL, but recieved U.\n";
+                        }
+                    }
+                    else
+                    {
+                        // Problem: request->packet id is not known
+                        std::cout << "Problem: Update packet id is not known\n";
+                    }
+                }
+                else if (IsCode(request->packet, MESG::HEADER::Codes::PING))
+                {
+                    // Just being a good neighbor.
+                    ConnMan::sendPongTo(cmstate,request->packet.address,GetConnectionId(request->packet));
+                }
+                else if (IsCode(request->packet, MESG::HEADER::Codes::PONG))
+                {
+                    // Calculate how long it took.
+                    uint32_t id = GetConnectionId(request->packet);
+                    Connection* pConn;
+                    if (GetConnectionById(cmstate.connections, id, &pConn))
+                    {
+                        pConn->endtime = clock::now();
+                        pConn->pingtimes.push_back(pConn->endtime - pConn->starttime);
+                        if (pConn->pingtimes.size() > 20)
+                            pConn->pingtimes.pop_front();
+                        pConn->pingtimes.push_back(pConn->endtime - pConn->starttime);
+
+                    }
+                }
+
 

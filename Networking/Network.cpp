@@ -357,7 +357,12 @@ void* Network::WorkerThread(NetworkState* netstate)
                     netstate->ioHandler(netstate->handlercontext, request, tid);
 
                     // Relinquish this overlapped structure
-                    netstate->socket.overlapPool.release(request->index);
+                    // If the iohandler reused this request
+                    // we do not want to release it.
+                    if (request->reuse = 0)
+                    {
+                        netstate->socket.overlapPool.release(request->index);
+                    }
                 }
             }
             else if (ckey == COMPLETION_KEY_SHUTDOWN)

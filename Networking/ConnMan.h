@@ -28,7 +28,7 @@ public:
         std::string gamename,
         std::string gamepass,
         ConnManState::OnEvent onevent,
-        ConnManState::OnUpdate onupdate
+        void* oneventcontext
     );
 
     static
@@ -105,7 +105,7 @@ public:
         ConnManState & cmstate,
         Address to,
         uint32_t id,
-        UPDATE & update
+        GENERAL & update
     );
 
     static

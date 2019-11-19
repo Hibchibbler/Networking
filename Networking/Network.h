@@ -149,6 +149,7 @@ public:
         this->wsaoverlapped.OffsetHigh = 0;
         this->wsaoverlapped.hEvent = 0;
         inuse = OVERLAP_STATUS_NOT_INUSE;
+        reuse = 0;
     }
     // WSAOVERLAPPED must be first member
     WSAOVERLAPPED       wsaoverlapped;
@@ -156,6 +157,7 @@ public:
     IOType              ioType;
     uint32_t            index;
     uint32_t            inuse;
+    uint32_t            reuse;
 
     Packet              packet;
 };

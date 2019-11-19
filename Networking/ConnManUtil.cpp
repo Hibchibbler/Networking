@@ -34,7 +34,8 @@ InitializePacket(
     Address & who,
     MESG::HEADER::Codes code,
     uint32_t id,
-    uint32_t traits
+    uint32_t traits,
+    uint32_t seq
 )
 {
     MESG* pMsg = (MESG*)packet.buffer;
@@ -45,7 +46,7 @@ InitializePacket(
     pMsg->header.code = (uint32_t)code;
     pMsg->header.id = id;
     pMsg->header.traits = traits;
-    pMsg->header.seq = 0;
+    pMsg->header.seq = seq;
     pMsg->header.crc = 0;
     return 0;
 }
@@ -141,19 +142,20 @@ IsGood2(
 }
 
 bool
-GetConnection(
-    std::vector<Connection> & connections,
+GetConnectionById(
+    std::list<Connection> & connections,
     uint32_t id,
     Connection** connection
 )
 {
     bool found = false;
     //for (auto & c : connections)
-    for (auto i = 0; i < connections.size(); i++)
+    //for (auto i = 0; i < connections.size(); i++)
+    for (auto & c : connections)
     {
-        if (id == connections[i].id)
+        if (id == c.id)
         {
-            *connection = &connections[i];
+            *connection = &c;
             found = true;
             break;
         }
@@ -249,26 +251,53 @@ PrintMsgHeader(
     std::cout << "  Crc:    " << std::hex << pDbgMsg->header.crc << "\n";
 }
 
-
 bool
-GetConnection(
-    std::vector<Connection> & connections,
-    std::string playername,
-    Connection** connection
+RemoveConnectionByName(
+    std::list<Connection> & connections,
+    std::string playername
 )
 {
     bool found = false;
-    //for (auto & c : connections)
-    for (auto i = 0; i < connections.size(); i++)
+    for (auto c = connections.begin(); c != connections.end(); c++)
     {
-        if (playername == connections[i].playername)
+        if (playername == c->playername)
         {
-            *connection = &connections[i];
+            c = connections.erase(c);
             found = true;
             break;
         }
     }
     return found;
+}
+bool
+GetConnectionByName(
+    std::list<Connection> & connections,
+    std::string playername,
+    Connection** connection
+)
+{
+    bool found = false;
+    //for (auto i = 0; i < connections.size(); i++)
+    for (auto & c : connections)
+    {
+        //if (playername == connections[i].playername)
+        if (playername == c.playername)
+        {
+            *connection = &c;
+            found = true;
+            break;
+        }
+    }
+    return found;
+}
+
+MESG*
+GetMesg(
+    Packet & packet
+)
+{
+    MESG* mesg = (MESG*)packet.buffer;
+    return mesg;
 }
 
 std::string
