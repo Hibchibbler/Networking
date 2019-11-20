@@ -58,11 +58,11 @@ public:
         ConnManState & cmstate
     );
 
-    static
-    uint64_t
-    sendStart(
-        ConnManState & cmstate
-    );
+    //static
+    //uint64_t
+    //sendStart(
+    //    ConnManState & cmstate
+    //);
 
     static
     uint64_t
@@ -91,38 +91,38 @@ public:
         std::string playername
     );
 
-    static
-    uint64_t
-    sendReadyTo(
-        ConnManState & cmstate,
-        Address to,
-        uint32_t id
-    );
+    //static
+    //uint64_t
+    //sendReadyTo(
+    //    ConnManState & cmstate,
+    //    Address to,
+    //    uint32_t id
+    //);
 
-    static
-    uint64_t
-    sendUpdateTo(
-        ConnManState & cmstate,
-        Address to,
-        uint32_t id,
-        GENERAL & update
-    );
+    //static
+    //uint64_t
+    //sendUpdateTo(
+    //    ConnManState & cmstate,
+    //    Address to,
+    //    uint32_t id,
+    //    GENERAL & update
+    //);
 
-    static
-    uint64_t
-    sendPingTo(
-        ConnManState & cmstate,
-        Address to,
-        uint32_t id
-    );
+    //static
+    //uint64_t
+    //sendPingTo(
+    //    ConnManState & cmstate,
+    //    Address to,
+    //    uint32_t id
+    //);
 
-    static
-    uint64_t
-    sendPongTo(
-        ConnManState & cmstate,
-        Address to,
-        uint32_t id
-    );
+    //static
+    //uint64_t
+    //sendPongTo(
+    //    ConnManState & cmstate,
+    //    Address to,
+    //    uint32_t id
+    //);
 
 };
 }

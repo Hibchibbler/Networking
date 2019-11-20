@@ -150,7 +150,8 @@ public:
 struct ConnManState
 {
     enum class OnEventType {
-        NEW,
+        CLIENTENTER,
+        CLIENTLEAVE,
         MESSAGE
     };
     typedef void(*OnEvent)(void* oecontext, OnEventType t, Connection* conn, Packet* packet);
@@ -169,8 +170,6 @@ struct ConnManState
     Mutex                   cmmutex;
     Thread                  threadConnMan;
     std::list<Connection>   connections;
-    //std::map<uint32_t, Connection>   connmap;
-    Connection              clientconnection;
     std::queue<Packet>      packets;
     OnEvent                 onevent;
     void*                   oneventcontext;

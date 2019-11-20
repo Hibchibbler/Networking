@@ -83,32 +83,32 @@ ConnMan::readyCount(
 
 
 
-uint64_t
-ConnMan::sendStart(
-    ConnManState & cmstate
-)
-{
-    //uint64_t cnt = 0;
-    //Packet startPacket;
-    //uint32_t traits = 0;
-    //cmstate.cmmutex.lock();
-    //for (auto & c : cmstate.connections)
-    //{
-    //    //if (c.state == Connection::State::WAITFORSTART)
-    //    {
-    //        InitializePacket(startPacket,
-    //                         c.who,
-    //                         MESG::HEADER::Codes::Start,
-    //                         c.id,
-    //                         traits, 0);
-
-    //        Network::write(cmstate.netstate, startPacket);
-    //        //c.state = Connection::State::GENERAL;
-    //    }
-    //}
-    //cmstate.cmmutex.unlock();
-    return 0;
-}
+//uint64_t
+//ConnMan::sendStart(
+//    ConnManState & cmstate
+//)
+//{
+//    //uint64_t cnt = 0;
+//    //Packet startPacket;
+//    //uint32_t traits = 0;
+//    //cmstate.cmmutex.lock();
+//    //for (auto & c : cmstate.connections)
+//    //{
+//    //    //if (c.state == Connection::State::WAITFORSTART)
+//    //    {
+//    //        InitializePacket(startPacket,
+//    //                         c.who,
+//    //                         MESG::HEADER::Codes::Start,
+//    //                         c.id,
+//    //                         traits, 0);
+//
+//    //        Network::write(cmstate.netstate, startPacket);
+//    //        //c.state = Connection::State::GENERAL;
+//    //    }
+//    //}
+//    //cmstate.cmmutex.unlock();
+//    return 0;
+//}
 
 
 
@@ -120,52 +120,52 @@ ConnMan::cleanup(
     Network::stop(state.netstate);
     state.cmmutex.destroy();
 }
-uint64_t
-ConnMan::sendPingTo(
-    ConnManState & cmstate,
-    Address to,
-    uint32_t id
-)
-{
-    //Packet packet;
-    //uint32_t traits = 0;
+//uint64_t
+//ConnMan::sendPingTo(
+//    ConnManState & cmstate,
+//    Address to,
+//    uint32_t id
+//)
+//{
+//    //Packet packet;
+//    //uint32_t traits = 0;
+//
+//    //InitializePacket(packet,
+//    //    to,
+//    //    MESG::HEADER::Codes::PING,
+//    //    id,
+//    //    traits, 0);
+//
+//    //Connection* pConn;
+//    //if (GetConnectionById(cmstate.connections, id, &pConn))
+//    //{
+//    //    pConn->starttime = clock::now();
+//    //}
+//    //Network::write(cmstate.netstate, packet);
+//
+//    return 0;
+//}
 
-    //InitializePacket(packet,
-    //    to,
-    //    MESG::HEADER::Codes::PING,
-    //    id,
-    //    traits, 0);
-
-    //Connection* pConn;
-    //if (GetConnectionById(cmstate.connections, id, &pConn))
-    //{
-    //    pConn->starttime = clock::now();
-    //}
-    //Network::write(cmstate.netstate, packet);
-
-    return 0;
-}
-
-uint64_t
-ConnMan::sendPongTo(
-    ConnManState & cmstate,
-    Address to,
-    uint32_t id
-)
-{
-    //Packet packet;
-    //uint32_t traits = 0;
-
-    //InitializePacket(packet,
-    //    to,
-    //    MESG::HEADER::Codes::PONG,
-    //    id,
-    //    traits, 0);
-
-    //Network::write(cmstate.netstate, packet);
-
-    return 0;
-}
+//uint64_t
+//ConnMan::sendPongTo(
+//    ConnManState & cmstate,
+//    Address to,
+//    uint32_t id
+//)
+//{
+//    //Packet packet;
+//    //uint32_t traits = 0;
+//
+//    //InitializePacket(packet,
+//    //    to,
+//    //    MESG::HEADER::Codes::PONG,
+//    //    id,
+//    //    traits, 0);
+//
+//    //Network::write(cmstate.netstate, packet);
+//
+//    return 0;
+//}
 
 uint64_t
 ConnMan::sendIdentifyTo(
@@ -216,28 +216,28 @@ ConnMan::sendIdentifyTo(
 
     return 0;
 }
-uint64_t
-ConnMan::sendUpdateTo(
-    ConnManState & cmstate,
-    Address to,
-    uint32_t id,
-    GENERAL & update
-)
-{
-    Packet packet;
-    uint32_t traits = 0;
-
-    InitializePacket(packet,
-        to,
-        MESG::HEADER::Codes::General,
-        id,
-        traits, 0);
-
-    MESG* pMsg = (MESG*)packet.buffer;
-    memcpy(&pMsg->payload.general, &update,sizeof(GENERAL));
-    Network::write(cmstate.netstate, packet);
-    return 0;
-}
+//uint64_t
+//ConnMan::sendUpdateTo(
+//    ConnManState & cmstate,
+//    Address to,
+//    uint32_t id,
+//    GENERAL & update
+//)
+//{
+//    Packet packet;
+//    uint32_t traits = 0;
+//
+//    InitializePacket(packet,
+//        to,
+//        MESG::HEADER::Codes::General,
+//        id,
+//        traits, 0);
+//
+//    MESG* pMsg = (MESG*)packet.buffer;
+//    memcpy(&pMsg->payload.general, &update,sizeof(GENERAL));
+//    Network::write(cmstate.netstate, packet);
+//    return 0;
+//}
 
 uint64_t
 ConnMan::sendGrantTo(
@@ -404,7 +404,7 @@ ConnMan::ConnManIOHandler(
                                     // Create and insert a new connection, 
                                     // randomly generate id, then send a Grant.
                                     //
-                                    std::cout << "Received an Identify\n";
+                                    std::cout << "Rx IDENTIFY\n";
                                     Connection connection;
                                     connection.playername = pn;
                                     connection.id = random_integer;
@@ -415,10 +415,10 @@ ConnMan::ConnManIOHandler(
                                     connection.level = Connection::AuthLevel::UNAUTH;
                                     cmstate.connections.push_back(connection);
                                     cmstate.onevent(cmstate.oneventcontext,
-                                                    ConnManState::OnEventType::NEW,
+                                                    ConnManState::OnEventType::CLIENTENTER,
                                                     &connection,
                                                     nullptr);
-
+                                    std::cout << "Tx Grant\n";
                                     ConnMan::sendGrantTo(cmstate, connection.who, connection.id, connection.playername);
                                 }
                                 else
@@ -427,7 +427,7 @@ ConnMan::ConnManIOHandler(
                                     ConnMan::sendDenyTo(cmstate,
                                         request->packet.address,
                                         GetPlayerName(request->packet));
-                                    std::cout << "Deny: Player Name already exists\n";
+                                    std::cout << "Tx Deny: Player Name already exists\n";
                                 }
                             }
                             else
@@ -436,7 +436,7 @@ ConnMan::ConnManIOHandler(
                                 ConnMan::sendDenyTo(cmstate,
                                     request->packet.address,
                                     GetPlayerName(request->packet));
-                                std::cout << "Deny: Password is bad\n";
+                                std::cout << "Tx Deny: Password is bad\n";
                             }
                         }
                         else
@@ -445,7 +445,7 @@ ConnMan::ConnManIOHandler(
                             ConnMan::sendDenyTo(cmstate,
                                 request->packet.address,
                                 GetPlayerName(request->packet));
-                            std::cout << "Deny: Game name is unknown\n";
+                            std::cout << "Tx Deny: Game name is unknown\n";
                         }
                     }
                 }
@@ -458,7 +458,7 @@ ConnMan::ConnManIOHandler(
                     if (GetConnectionById(cmstate.connections, cid, &pConn))
                     {
                         pConn->state = Connection::State::ACKRECEIVED;
-                        std::cout << "Received an ACK\n";
+                        std::cout << "Rx ACK\n";
                     }
                     else
                     {
@@ -523,7 +523,6 @@ ConnMan::ConnManIOHandler(
                     uint32_t cid = GetConnectionId(request->packet);
                     if (GetConnectionById(cmstate.connections, cid, &pConn))
                     {
-                        std::cout << "Received A packet\n";
                         cmstate.packets.push(request->packet);
 
                         if (IsExpectsAck(request->packet))
@@ -536,7 +535,7 @@ ConnMan::ConnManIOHandler(
                                 0,
                                 ((MESG*)request->packet.buffer)->header.seq);
                             Network::write(cmstate.netstate, packet);
-                            std::cout << "Acking\n";
+                            std::cout << "<<Acking>>\n";
                         }
                     }
                     else
@@ -584,29 +583,29 @@ ConnMan::ConnManIOHandler(
     return;
 }
 
-uint64_t
-ConnMan::sendReadyTo(
-    ConnManState & cmstate,
-    Address to,
-    uint32_t id
-)
-{
-    //Packet packet;
-
-    //uint32_t traits = 0;
-
-    //InitializePacket(packet,
-    //                 to,
-    //                 MESG::HEADER::Codes::General,
-    //                 id,
-    //                 traits, 0);
-
-    //MESG* msg = (MESG*)packet.buffer;
-    //GameMesg* gmsg = (GameMesg*)msg->payload;
-
-    //Network::write(cmstate.netstate, packet);
-    ////cmstate.connections.front().state = Connection::State::WAITFORSTART;
-    return 0;
-}
+//uint64_t
+//ConnMan::sendReadyTo(
+//    ConnManState & cmstate,
+//    Address to,
+//    uint32_t id
+//)
+//{
+//    //Packet packet;
+//
+//    //uint32_t traits = 0;
+//
+//    //InitializePacket(packet,
+//    //                 to,
+//    //                 MESG::HEADER::Codes::General,
+//    //                 id,
+//    //                 traits, 0);
+//
+//    //MESG* msg = (MESG*)packet.buffer;
+//    //GameMesg* gmsg = (GameMesg*)msg->payload;
+//
+//    //Network::write(cmstate.netstate, packet);
+//    ////cmstate.connections.front().state = Connection::State::WAITFORSTART;
+//    return 0;
+//}
 
 } // namespace bali
