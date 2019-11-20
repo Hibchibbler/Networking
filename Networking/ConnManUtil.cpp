@@ -20,11 +20,8 @@ SizeofPayload(
     if (code == MESG::HEADER::Codes::Identify) { payloadSize += sizeof(IDENTIFY); }
     if (code == MESG::HEADER::Codes::Grant) { payloadSize += sizeof(GRANT); }
     if (code == MESG::HEADER::Codes::Deny) { payloadSize += sizeof(DENY); }
-    if (code == MESG::HEADER::Codes::Ready) { payloadSize += sizeof(READY); }
-    if (code == MESG::HEADER::Codes::Start) { payloadSize += sizeof(START); }
-    if (code == MESG::HEADER::Codes::General) { payloadSize += sizeof(UPDATE); }
-    if (code == MESG::HEADER::Codes::Leave) { payloadSize += sizeof(LEAVE); }
-    if (code == MESG::HEADER::Codes::LobbyUpdate) { payloadSize += sizeof(LOBBYUPDATE); }
+    if (code == MESG::HEADER::Codes::General) { payloadSize += sizeof(GENERAL); }
+
     return payloadSize;
 }
 
@@ -231,14 +228,8 @@ PrintMsgHeader(
         case (uint32_t)MESG::HEADER::Codes::Deny:
             std::cout << "  Code: Deny\n";
             break;
-        case (uint32_t)MESG::HEADER::Codes::Ready:
-            std::cout << "  Code: Ready\n";
-            break;
-        case (uint32_t)MESG::HEADER::Codes::Start:
-            std::cout << "  Code: Start\n";
-            break;
         case (uint32_t)MESG::HEADER::Codes::General:
-            std::cout << "  Code: Update\n";
+            std::cout << "  Code: General\n";
             break;
         default:
             std::cout << "  Code: Something or nother\n";

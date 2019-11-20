@@ -43,7 +43,7 @@ struct DENY
 
 struct GENERAL
 {
-    uint64_t blargh;
+    uint8_t buffer[1024];
 };
 
 //struct LEAVE
@@ -94,11 +94,13 @@ struct MESG
     }header;
 
     union {
+        uint8_t     buffer[1024]; // Packet expects MESG to be <= 1280
+
         IDENTIFY    identify;   // Client Rx
         GRANT       grant;      // Server Rx
         DENY        deny;       // Server Rx
         ACK         ack;
-        GENERAL     general;     // Client Rx & Server Rx
+        GENERAL     general;    // Client Rx & Server Rx
 
     }payload;
 };

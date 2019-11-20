@@ -54,31 +54,59 @@ ConnMan::readyCount(
     return cnt;
 }
 
+//uint64_t
+//sendPacket(
+//    ConnManState & cmstate,
+//    Packet & packet,
+//    void* payload,
+//    uint32_t payloadsize
+//)
+//{
+//    uint64_t cnt = 0;
+//    uint32_t traits = 0;
+//    cmstate.cmmutex.lock();
+//    for (auto & c : cmstate.connections)
+//    {
+//        InitializePacket(packet,
+//                         c.who,
+//                         MESG::HEADER::Codes::General,
+//                         c.id,
+//                         traits, 0);
+//        MESG* pMsg = (MESG*)packet.buffer;
+//        memcpy(&pMsg->payload.general, payload, payloadsize);
+//
+//        Network::write(cmstate.netstate, packet);
+//    }
+//    cmstate.cmmutex.unlock();
+//    return 0;
+//}
+
+
 
 uint64_t
 ConnMan::sendStart(
     ConnManState & cmstate
 )
 {
-    uint64_t cnt = 0;
-    Packet startPacket;
-    uint32_t traits = 0;
-    cmstate.cmmutex.lock();
-    for (auto & c : cmstate.connections)
-    {
-        //if (c.state == Connection::State::WAITFORSTART)
-        {
-            InitializePacket(startPacket,
-                             c.who,
-                             MESG::HEADER::Codes::Start,
-                             c.id,
-                             traits, 0);
+    //uint64_t cnt = 0;
+    //Packet startPacket;
+    //uint32_t traits = 0;
+    //cmstate.cmmutex.lock();
+    //for (auto & c : cmstate.connections)
+    //{
+    //    //if (c.state == Connection::State::WAITFORSTART)
+    //    {
+    //        InitializePacket(startPacket,
+    //                         c.who,
+    //                         MESG::HEADER::Codes::Start,
+    //                         c.id,
+    //                         traits, 0);
 
-            Network::write(cmstate.netstate, startPacket);
-            //c.state = Connection::State::GENERAL;
-        }
-    }
-    cmstate.cmmutex.unlock();
+    //        Network::write(cmstate.netstate, startPacket);
+    //        //c.state = Connection::State::GENERAL;
+    //    }
+    //}
+    //cmstate.cmmutex.unlock();
     return 0;
 }
 
@@ -99,21 +127,21 @@ ConnMan::sendPingTo(
     uint32_t id
 )
 {
-    Packet packet;
-    uint32_t traits = 0;
+    //Packet packet;
+    //uint32_t traits = 0;
 
-    InitializePacket(packet,
-        to,
-        MESG::HEADER::Codes::PING,
-        id,
-        traits, 0);
+    //InitializePacket(packet,
+    //    to,
+    //    MESG::HEADER::Codes::PING,
+    //    id,
+    //    traits, 0);
 
-    Connection* pConn;
-    if (GetConnectionById(cmstate.connections, id, &pConn))
-    {
-        pConn->starttime = clock::now();
-    }
-    Network::write(cmstate.netstate, packet);
+    //Connection* pConn;
+    //if (GetConnectionById(cmstate.connections, id, &pConn))
+    //{
+    //    pConn->starttime = clock::now();
+    //}
+    //Network::write(cmstate.netstate, packet);
 
     return 0;
 }
@@ -125,16 +153,16 @@ ConnMan::sendPongTo(
     uint32_t id
 )
 {
-    Packet packet;
-    uint32_t traits = 0;
+    //Packet packet;
+    //uint32_t traits = 0;
 
-    InitializePacket(packet,
-        to,
-        MESG::HEADER::Codes::PONG,
-        id,
-        traits, 0);
+    //InitializePacket(packet,
+    //    to,
+    //    MESG::HEADER::Codes::PONG,
+    //    id,
+    //    traits, 0);
 
-    Network::write(cmstate.netstate, packet);
+    //Network::write(cmstate.netstate, packet);
 
     return 0;
 }
@@ -563,21 +591,21 @@ ConnMan::sendReadyTo(
     uint32_t id
 )
 {
-    Packet packet;
+    //Packet packet;
 
-    uint32_t traits = 0;
+    //uint32_t traits = 0;
 
-    InitializePacket(packet,
-                     to,
-                     MESG::HEADER::Codes::General,
-                     id,
-                     traits, 0);
+    //InitializePacket(packet,
+    //                 to,
+    //                 MESG::HEADER::Codes::General,
+    //                 id,
+    //                 traits, 0);
 
-    MESG* msg = (MESG*)packet.buffer;
-    GameMesg* gmsg = (GameMesg*)msg->payload;
+    //MESG* msg = (MESG*)packet.buffer;
+    //GameMesg* gmsg = (GameMesg*)msg->payload;
 
-    Network::write(cmstate.netstate, packet);
-    //cmstate.connections.front().state = Connection::State::WAITFORSTART;
+    //Network::write(cmstate.netstate, packet);
+    ////cmstate.connections.front().state = Connection::State::WAITFORSTART;
     return 0;
 }
 
