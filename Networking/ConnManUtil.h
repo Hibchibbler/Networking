@@ -113,17 +113,7 @@ public:
         LOCAL,
         REMOTE
     };
-    //enum class State {
-    //    WAITFORGRANTDENY,   // Client
-    //    GRANTED,            // Client
-    //    DENIED,             // Client
-    //    WAITFORREADY,       // Client/Server
-    //    WAITFORSTART,       // Client/Server
-    //    GENERAL,            // Connection Established
-    //    SENDACK,
-    //    WAITFORACK,
-    //    INVALID
-    //};
+
     enum class State {
         IDLE,
         WAITONACK,
@@ -150,9 +140,11 @@ public:
 struct ConnManState
 {
     enum class OnEventType {
-        CLIENTENTER,
-        CLIENTLEAVE,
-        MESSAGE
+        CLIENTENTER, // Server Side Event
+        CLIENTLEAVE, // Server Side Event
+        GRANTED,     // Client Side Event
+        DENIED,      // Client Side Event
+        MESSAGE      // Event for All
     };
     typedef void(*OnEvent)(void* oecontext, OnEventType t, Connection* conn, Packet* packet);
 
@@ -170,6 +162,7 @@ struct ConnManState
     Mutex                   cmmutex;
     Thread                  threadConnMan;
     std::list<Connection>   connections;
+    Connection              localconn;
     std::queue<Packet>      packets;
     OnEvent                 onevent;
     void*                   oneventcontext;

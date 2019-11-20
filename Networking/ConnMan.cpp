@@ -42,75 +42,10 @@ ConnMan::readyCount(
 {
     uint64_t cnt = 0;
     cmstate.cmmutex.lock();
-    //for (auto c : cmstate.connections)
-    //{
-    //    if (c.state == Connection::State::WAITFORSTART)
-    //    {
-    //        cnt++;
-    //    }
-    //}
     cnt = cmstate.connections.size();
     cmstate.cmmutex.unlock();
     return cnt;
 }
-
-//uint64_t
-//sendPacket(
-//    ConnManState & cmstate,
-//    Packet & packet,
-//    void* payload,
-//    uint32_t payloadsize
-//)
-//{
-//    uint64_t cnt = 0;
-//    uint32_t traits = 0;
-//    cmstate.cmmutex.lock();
-//    for (auto & c : cmstate.connections)
-//    {
-//        InitializePacket(packet,
-//                         c.who,
-//                         MESG::HEADER::Codes::General,
-//                         c.id,
-//                         traits, 0);
-//        MESG* pMsg = (MESG*)packet.buffer;
-//        memcpy(&pMsg->payload.general, payload, payloadsize);
-//
-//        Network::write(cmstate.netstate, packet);
-//    }
-//    cmstate.cmmutex.unlock();
-//    return 0;
-//}
-
-
-
-//uint64_t
-//ConnMan::sendStart(
-//    ConnManState & cmstate
-//)
-//{
-//    //uint64_t cnt = 0;
-//    //Packet startPacket;
-//    //uint32_t traits = 0;
-//    //cmstate.cmmutex.lock();
-//    //for (auto & c : cmstate.connections)
-//    //{
-//    //    //if (c.state == Connection::State::WAITFORSTART)
-//    //    {
-//    //        InitializePacket(startPacket,
-//    //                         c.who,
-//    //                         MESG::HEADER::Codes::Start,
-//    //                         c.id,
-//    //                         traits, 0);
-//
-//    //        Network::write(cmstate.netstate, startPacket);
-//    //        //c.state = Connection::State::GENERAL;
-//    //    }
-//    //}
-//    //cmstate.cmmutex.unlock();
-//    return 0;
-//}
-
-
 
 void
 ConnMan::cleanup(
@@ -120,52 +55,6 @@ ConnMan::cleanup(
     Network::stop(state.netstate);
     state.cmmutex.destroy();
 }
-//uint64_t
-//ConnMan::sendPingTo(
-//    ConnManState & cmstate,
-//    Address to,
-//    uint32_t id
-//)
-//{
-//    //Packet packet;
-//    //uint32_t traits = 0;
-//
-//    //InitializePacket(packet,
-//    //    to,
-//    //    MESG::HEADER::Codes::PING,
-//    //    id,
-//    //    traits, 0);
-//
-//    //Connection* pConn;
-//    //if (GetConnectionById(cmstate.connections, id, &pConn))
-//    //{
-//    //    pConn->starttime = clock::now();
-//    //}
-//    //Network::write(cmstate.netstate, packet);
-//
-//    return 0;
-//}
-
-//uint64_t
-//ConnMan::sendPongTo(
-//    ConnManState & cmstate,
-//    Address to,
-//    uint32_t id
-//)
-//{
-//    //Packet packet;
-//    //uint32_t traits = 0;
-//
-//    //InitializePacket(packet,
-//    //    to,
-//    //    MESG::HEADER::Codes::PONG,
-//    //    id,
-//    //    traits, 0);
-//
-//    //Network::write(cmstate.netstate, packet);
-//
-//    return 0;
-//}
 
 uint64_t
 ConnMan::sendIdentifyTo(
@@ -200,44 +89,24 @@ ConnMan::sendIdentifyTo(
 
     Network::write(cmstate.netstate, ipacket);
 
-    ////
-    //// Let's put a new connection into the list
-    ////
-    //Connection connection;
-    //connection.playername = playername;
+    //
+    // Let's put a new connection into the list
+    //
+    Connection connection;
+    connection.playername = playername;
 
-    //// But we don't know it's ID yet
-    //// because we have not yet been GRANTed
-    //connection.id = 0;
-    //connection.state = Connection::State::IDLE;
-    //connection.conntype = Connection::ConnectionType::LOCAL;
+    // But we don't know it's ID yet
+    // because we have not yet been GRANTed
+    connection.id = 0;
+    connection.level = Connection::AuthLevel::UNAUTH;
+    connection.state = Connection::State::IDLE;
+    connection.conntype = Connection::ConnectionType::LOCAL;
 
     //cmstate.connections.push_back(connection);
+    cmstate.localconn = connection;
 
     return 0;
 }
-//uint64_t
-//ConnMan::sendUpdateTo(
-//    ConnManState & cmstate,
-//    Address to,
-//    uint32_t id,
-//    GENERAL & update
-//)
-//{
-//    Packet packet;
-//    uint32_t traits = 0;
-//
-//    InitializePacket(packet,
-//        to,
-//        MESG::HEADER::Codes::General,
-//        id,
-//        traits, 0);
-//
-//    MESG* pMsg = (MESG*)packet.buffer;
-//    memcpy(&pMsg->payload.general, &update,sizeof(GENERAL));
-//    Network::write(cmstate.netstate, packet);
-//    return 0;
-//}
 
 uint64_t
 ConnMan::sendGrantTo(
@@ -320,13 +189,21 @@ ConnMan::updateServer(
         packet = cmstate.packets.front();
         cmstate.packets.pop();
         cid = GetConnectionId(packet);
-        if (GetConnectionById(cmstate.connections, cid, &pConn))
+
+        if (cid == (uint32_t)cmstate.localconn.id)
         {
-            cmstate.onevent(cmstate.oneventcontext,
-                            ConnManState::OnEventType::MESSAGE,
-                            pConn,
-                            &packet);
+            pConn = &cmstate.localconn;
         }
+        else if (!GetConnectionById(cmstate.connections, cid, &pConn))
+        {
+            pConn = nullptr;
+        }
+
+        cmstate.onevent(cmstate.oneventcontext,
+                        ConnManState::OnEventType::MESSAGE,
+                        pConn,
+                        &packet);
+        
     }
 
     //
@@ -417,8 +294,8 @@ ConnMan::ConnManIOHandler(
                                     cmstate.onevent(cmstate.oneventcontext,
                                                     ConnManState::OnEventType::CLIENTENTER,
                                                     &connection,
-                                                    nullptr);
-                                    std::cout << "Tx Grant\n";
+                                                    &request->packet);
+                                    std::cout << "Tx Grant: " << random_integer << "\n";
                                     ConnMan::sendGrantTo(cmstate, connection.who, connection.id, connection.playername);
                                 }
                                 else
@@ -462,56 +339,47 @@ ConnMan::ConnManIOHandler(
                     }
                     else
                     {
-                        std::cout << "Weird: Outgoing Packet contains unknown ID!\n";
+                        std::cout << "Problem: Rx'd ACK Packet contains unknown ID!\n";
                     }
                 }
                 else if (IsCode(request->packet, MESG::HEADER::Codes::Grant))
                 {
-                    bool ret;
-                    std::string playername;
-                    Connection * pConn = nullptr;
                     //
                     // If we're receiving a Grant,
                     // then the associated connection has not yet been assigned an Id.
                     // Therefore, we find the associated connection
                     // by name
                     //
-                    playername = GetPlayerName(request->packet);
-                    ret = GetConnectionByName(cmstate.connections, playername, &pConn);
-                    if (ret)
+                    std::string playername = GetPlayerName(request->packet);
+                    if (playername == cmstate.localconn.playername)
                     {
-                        if (pConn->level == Connection::AuthLevel::UNAUTH)
+                        if (cmstate.localconn.level == Connection::AuthLevel::UNAUTH)
                         {
-                            pConn->level = Connection::AuthLevel::AUTH;
-                            pConn->id = GetConnectionId(request->packet);
+                            cmstate.localconn.level = Connection::AuthLevel::AUTH;
+                            cmstate.localconn.id = GetConnectionId(request->packet);
+                            cmstate.onevent(cmstate.oneventcontext, ConnManState::OnEventType::GRANTED, &cmstate.localconn, &request->packet);
                         }
                         else
                         {
                             // Weird: We're not supposed to recieve U right now.
-                            std::cout << "Weird: We're not in WAITFORGRANTDENY, but received G.\n";
+                            std::cout << "Weird: We're already authorized, but received a Grant.\n";
                         }
                     }
                     else
                     {
-                        // Problem: request->packet id is not known
-                        std::cout << "Problem: Grant packet id is not known\n";
+                        std::cout << "Weird: Client Rx Grant contains unknown Player Name\n";
                     }
                 }
                 else if (IsCode(request->packet, MESG::HEADER::Codes::Deny))
                 {
-                    bool ret;
-                    std::string playername;
-                    Connection * pConn = nullptr;
-                    playername = GetPlayerName(request->packet);
-                    ret = GetConnectionByName(cmstate.connections, playername, &pConn);
-                    if (ret)
+                    std::string playername = GetPlayerName(request->packet);
+                    if (playername == cmstate.localconn.playername)
                     {
-                        RemoveConnectionByName(cmstate.connections, playername);
+                        cmstate.onevent(cmstate.oneventcontext, ConnManState::OnEventType::DENIED, &cmstate.localconn, &request->packet);
                     }
                     else
                     {
-                        // Problem: request->packet id is not known
-                        std::cout << "Problem: Grant packet id is not known\n";
+                        std::cout << "Weird: Client Rx Deny contains unknown Player Name\n";
                     }
                 }
                 else
@@ -521,7 +389,9 @@ ConnMan::ConnManIOHandler(
                     //
                     Connection* pConn;
                     uint32_t cid = GetConnectionId(request->packet);
-                    if (GetConnectionById(cmstate.connections, cid, &pConn))
+
+                    if (cid == (uint32_t)cmstate.localconn.id ||
+                        GetConnectionById(cmstate.connections, cid, &pConn))
                     {
                         cmstate.packets.push(request->packet);
 
@@ -529,18 +399,18 @@ ConnMan::ConnManIOHandler(
                         {
                             Packet packet;
                             InitializePacket(packet,
-                                request->packet.address,
-                                MESG::HEADER::Codes::Ack,
-                                ((MESG*)request->packet.buffer)->header.id,
-                                0,
-                                ((MESG*)request->packet.buffer)->header.seq);
+                                             request->packet.address,
+                                             MESG::HEADER::Codes::Ack,
+                                             ((MESG*)request->packet.buffer)->header.id,
+                                             0,
+                                             ((MESG*)request->packet.buffer)->header.seq);
                             Network::write(cmstate.netstate, packet);
                             std::cout << "<<Acking>>\n";
                         }
                     }
                     else
                     {
-                        std::cout << "Weird: Packet contains unknown ID\n";
+                        std::cout << "Weird: GENERAL Packet contains unknown ID\n";
                     }
                 }
             }
@@ -583,29 +453,5 @@ ConnMan::ConnManIOHandler(
     return;
 }
 
-//uint64_t
-//ConnMan::sendReadyTo(
-//    ConnManState & cmstate,
-//    Address to,
-//    uint32_t id
-//)
-//{
-//    //Packet packet;
-//
-//    //uint32_t traits = 0;
-//
-//    //InitializePacket(packet,
-//    //                 to,
-//    //                 MESG::HEADER::Codes::General,
-//    //                 id,
-//    //                 traits, 0);
-//
-//    //MESG* msg = (MESG*)packet.buffer;
-//    //GameMesg* gmsg = (GameMesg*)msg->payload;
-//
-//    //Network::write(cmstate.netstate, packet);
-//    ////cmstate.connections.front().state = Connection::State::WAITFORSTART;
-//    return 0;
-//}
 
 } // namespace bali

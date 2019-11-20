@@ -167,6 +167,7 @@ Network::Result Network::createSocket(Socket & s, ULONG_PTR completionKey)
     if (s.handle != INVALID_SOCKET)
     {
         s.completionKey = completionKey;
+        ZeroMemory(&s.local, sizeof(s.local));
     }
     else
     {
@@ -264,6 +265,7 @@ Network::Result Network::write(NetworkState& netstate, Packet & packet)
     else
     {
         result.type = Network::ResultType::FAILED_SOCKET_NOMOREOVERLAPPED;
+        std::cout << "Problem: Network::write() says No More Overlaps!\n";
     }
     return result;
 }
@@ -321,6 +323,7 @@ Network::Result Network::read(NetworkState& netstate)
     else
     {
         result.type = Network::ResultType::FAILED_SOCKET_NOMOREOVERLAPPED;
+        std::cout << "Problem: Network::read() says No More Overlaps!\n";
     }
     return result;
 }
@@ -359,10 +362,10 @@ void* Network::WorkerThread(NetworkState* netstate)
                     // Relinquish this overlapped structure
                     // If the iohandler reused this request
                     // we do not want to release it.
-                    if (request->reuse = 0)
-                    {
-                        netstate->socket.overlapPool.release(request->index);
-                    }
+                    //if (request->reuse = 0)
+                    //{
+                    netstate->socket.overlapPool.release(request->index);
+                    //}
                 }
             }
             else if (ckey == COMPLETION_KEY_SHUTDOWN)

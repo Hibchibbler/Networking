@@ -146,6 +146,7 @@ GetConnectionById(
 )
 {
     bool found = false;
+    *connection = nullptr;
     //for (auto & c : connections)
     //for (auto i = 0; i < connections.size(); i++)
     for (auto & c : connections)

@@ -23,7 +23,7 @@
     <ProjectGuid>{00486D5C-4465-48DF-8D37-32F88CD25F13}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
     <RootNamespace>Networking</RootNamespace>
-    <WindowsTargetPlatformVersion>10.0.16299.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0.18362.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
@@ -152,12 +152,14 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="CommMan.h" />
     <ClInclude Include="ConnMan.h" />
     <ClInclude Include="ConnManUtil.h" />
     <ClInclude Include="Network.h" />
     <ClInclude Include="targetver.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="CommMan.cpp" />
     <ClCompile Include="ConnMan.cpp" />
     <ClCompile Include="ConnManUtil.cpp" />
     <ClCompile Include="Network.cpp" />
