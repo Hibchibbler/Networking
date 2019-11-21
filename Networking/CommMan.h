@@ -65,6 +65,20 @@ SendUpdateMesg(
     uint32_t payloadsize
 );
 
+uint32_t
+SendPingMesg(
+    ConnManState& cmstate,
+    Address to,
+    uint32_t id
+);
+
+uint32_t
+SendPongMesg(
+    ConnManState& cmstate,
+    Address to,
+    uint32_t id
+);
+
 class CommMan
 {
 public:

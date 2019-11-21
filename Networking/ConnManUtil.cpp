@@ -160,7 +160,21 @@ GetConnectionById(
     }
     return found;
 }
-
+Connection*
+GetConnectionById(
+    std::list<Connection> & connections,
+    uint32_t id
+)
+{
+    for (auto & c : connections)
+    {
+        if (id == c.id)
+        {
+            return &c;
+        }
+    }
+    return nullptr;
+}
 
 uint32_t
 GetConnectionId(
@@ -261,26 +275,21 @@ RemoveConnectionByName(
     }
     return found;
 }
-bool
+Connection*
 GetConnectionByName(
     std::list<Connection> & connections,
-    std::string playername,
-    Connection** connection
+    std::string playername
 )
 {
-    bool found = false;
-    //for (auto i = 0; i < connections.size(); i++)
     for (auto & c : connections)
     {
-        //if (playername == connections[i].playername)
         if (playername == c.playername)
         {
-            *connection = &c;
-            found = true;
-            break;
+            return &c;
+
         }
     }
-    return found;
+    return nullptr;
 }
 
 MESG*

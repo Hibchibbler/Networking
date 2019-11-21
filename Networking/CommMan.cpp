@@ -84,6 +84,38 @@ SendUpdateMesg(
     return 0;
 }
 
+uint32_t
+SendPingMesg(
+    ConnManState& cmstate,
+    Address to,
+    uint32_t id
+)
+{
+    
+    cmstate.localconn.starttime = clock::now();
+    return SendGameMesg(cmstate,
+                        to,
+                        cmstate.localconn.id,
+                        GameMesg::Codes::PING,
+                        0,
+                        0);
+}
+
+uint32_t
+SendPongMesg(
+    ConnManState& cmstate,
+    Address to,
+    uint32_t id
+)
+{
+    return SendGameMesg(cmstate,
+                        to,
+                        id,
+                        GameMesg::Codes::PONG,
+                        0,
+                        0);
+}
+
 GameMesg*
 GetGameMesg(
     MESG* pMsg

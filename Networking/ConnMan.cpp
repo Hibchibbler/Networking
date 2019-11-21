@@ -436,18 +436,23 @@ ConnMan::ConnManIOHandler(
         // Debug Print buffer
         //PrintMsgHeader(request->packet, false);
         Connection* pConn;
-        uint32_t cid = GetConnectionId(request->packet);
-        if (GetConnectionById(cmstate.connections, cid, &pConn))
+        uint32_t code = GetMesg(request->packet)->header.code;
+        if (code == (uint32_t)MESG::HEADER::Codes::Ack &&
+            code == (uint32_t)MESG::HEADER::Codes::General)
         {
-            if (IsExpectsAck(request->packet))
+            uint32_t cid = GetConnectionId(request->packet);
+            if (GetConnectionById(cmstate.connections, cid, &pConn))
             {
-                pConn->state = Connection::State::WAITONACK;
-                pConn->starttime = clock::now();
+                if (IsExpectsAck(request->packet))
+                {
+                    pConn->state = Connection::State::WAITONACK;
+                    pConn->starttime = clock::now();
+                }
             }
-        }
-        else
-        {
-            std::cout << "Weird: Outgoing Packet contains unknown ID!\n";
+            else
+            {
+                std::cout << "Weird: Outgoing Packet contains unknown ID!\n";
+            }
         }
     }
     return;

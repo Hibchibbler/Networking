@@ -33,40 +33,13 @@ struct DENY
     CHAR playername[16];
 };
 
-//struct READY
-//{
-//};
-//
-//struct START
-//{
-//};
-
 struct GENERAL
 {
     uint8_t buffer[1024];
 };
 
-//struct LEAVE
-//{
-//};
-
 struct ACK
 {
-};
-
-//struct PING
-//{
-//};
-//
-//struct PONG
-//{
-//};
-
-struct LOBBYUPDATE
-{
-    // Updates on who else is in the Lobby...
-    // Player needs to know whether or not to 
-    // Ready Up.
 };
 
 
@@ -183,6 +156,7 @@ uint32_t
 SizeofPayload(
     MESG::HEADER::Codes code
 );
+
 uint64_t
 InitializePacket(
     Packet & packet,
@@ -215,6 +189,12 @@ IsGood2(
     Packet & packet
 );
 
+Connection*
+GetConnectionById(
+    std::list<Connection> & connections,
+    uint32_t id
+);
+
 bool
 GetConnectionById(
     std::list<Connection> & connections,
@@ -223,11 +203,10 @@ GetConnectionById(
 );
 
 
-bool
+Connection*
 GetConnectionByName(
     std::list<Connection> & connections,
-    std::string playername,
-    Connection** connection
+    std::string playername
 );
 
 std::string
