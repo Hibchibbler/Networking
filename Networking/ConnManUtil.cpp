@@ -97,69 +97,6 @@ IsSizeValid(
     return ret;
 }
 
-
-bool
-IsGood2(
-    MESG::HEADER::Codes code,
-    Packet & packet
-)
-{
-    bool ret = false;
-
-    {
-        if (IsMagicGood(packet))
-        {
-            if (IsSizeValid(packet))
-            {
-                if (IsCode(packet, code))
-                {
-                    //ConnMan::processWaitForIdentify(cmstate, connection, packet);
-                    //std::cout << "Rx Identify.\n";
-                    ret = true;
-                }
-                else
-                {
-                    // Not the Code we're looking for
-                    std::cout << "Rx: Weird, packet not expected\n";
-                }
-            }
-            else
-            {
-                // Invalid - Size does not match code
-                std::cout << "Rx: Packet Bad Size\n";
-            }
-        }
-        else
-        {
-            // Invalid - No Magic
-            std::cout << "Rx: Packet Bad Magic\n";
-        }
-    }
-    return ret;
-}
-
-bool
-GetConnectionById(
-    std::list<Connection> & connections,
-    uint32_t id,
-    Connection** connection
-)
-{
-    bool found = false;
-    *connection = nullptr;
-    //for (auto & c : connections)
-    //for (auto i = 0; i < connections.size(); i++)
-    for (auto & c : connections)
-    {
-        if (id == c.id)
-        {
-            *connection = &c;
-            found = true;
-            break;
-        }
-    }
-    return found;
-}
 Connection*
 GetConnectionById(
     std::list<Connection> & connections,

@@ -102,7 +102,6 @@ ConnMan::sendIdentifyTo(
     connection.state = Connection::State::IDLE;
     connection.conntype = Connection::ConnectionType::LOCAL;
 
-    //cmstate.connections.push_back(connection);
     cmstate.localconn = connection;
 
     return 0;
@@ -185,18 +184,15 @@ ConnMan::updateServer(
         Connection* pConn = nullptr;
         Packet packet;
         uint32_t cid = 0;
-        
+
         packet = cmstate.packets.front();
         cmstate.packets.pop();
         cid = GetConnectionId(packet);
 
-        if (cid == (uint32_t)cmstate.localconn.id)
+        pConn = GetConnectionById(cmstate.connections, cid);
+        if (!pConn)
         {
             pConn = &cmstate.localconn;
-        }
-        else if (!GetConnectionById(cmstate.connections, cid, &pConn))
-        {
-            pConn = nullptr;
         }
 
         cmstate.onevent(cmstate.oneventcontext,
@@ -211,6 +207,21 @@ ConnMan::updateServer(
     //
     for (auto & c : cmstate.connections)
     {
+        //
+        // Connection hasn't seen traffic in over 5 seconds
+        // Notify user.
+        //
+        duration d = clock::now() - c.checkintime;
+        if (d.count() > 5000)
+        {
+            cmstate.onevent(cmstate.oneventcontext,
+                            ConnManState::OnEventType::STALECONNECTION,
+                            &c,
+                            nullptr);
+
+            c.checkintime = clock::now();
+        }
+
         //
         // Time out those waiting for an ACK
         //
@@ -332,7 +343,8 @@ ConnMan::ConnManIOHandler(
                     // Something is eagerly awaiting this i'm sure.
                     Connection* pConn;
                     uint32_t cid = GetConnectionId(request->packet);
-                    if (GetConnectionById(cmstate.connections, cid, &pConn))
+                    pConn = GetConnectionById(cmstate.connections, cid);
+                    if (pConn)
                     {
                         pConn->state = Connection::State::ACKRECEIVED;
                         std::cout << "Rx ACK\n";
@@ -355,6 +367,7 @@ ConnMan::ConnManIOHandler(
                     {
                         if (cmstate.localconn.level == Connection::AuthLevel::UNAUTH)
                         {
+                            cmstate.localconn.checkintime = clock::now();
                             cmstate.localconn.level = Connection::AuthLevel::AUTH;
                             cmstate.localconn.id = GetConnectionId(request->packet);
                             cmstate.onevent(cmstate.oneventcontext, ConnManState::OnEventType::GRANTED, &cmstate.localconn, &request->packet);
@@ -375,6 +388,7 @@ ConnMan::ConnManIOHandler(
                     std::string playername = GetPlayerName(request->packet);
                     if (playername == cmstate.localconn.playername)
                     {
+                        cmstate.localconn.checkintime = clock::now();
                         cmstate.onevent(cmstate.oneventcontext, ConnManState::OnEventType::DENIED, &cmstate.localconn, &request->packet);
                     }
                     else
@@ -387,30 +401,36 @@ ConnMan::ConnManIOHandler(
                     //
                     // Rx'd something other than Identify, or Ack
                     //
-                    Connection* pConn;
-                    uint32_t cid = GetConnectionId(request->packet);
-
-                    if (cid == (uint32_t)cmstate.localconn.id ||
-                        GetConnectionById(cmstate.connections, cid, &pConn))
+                    Connection* pConn = nullptr;
+                    uint32_t cid;
+                    
+                    cid = GetConnectionId(request->packet);
+                    pConn = GetConnectionById(cmstate.connections, cid);
+                    if (!pConn)
                     {
-                        cmstate.packets.push(request->packet);
-
-                        if (IsExpectsAck(request->packet))
+                        if (cid == (uint32_t)cmstate.localconn.id)
                         {
-                            Packet packet;
-                            InitializePacket(packet,
-                                             request->packet.address,
-                                             MESG::HEADER::Codes::Ack,
-                                             ((MESG*)request->packet.buffer)->header.id,
-                                             0,
-                                             ((MESG*)request->packet.buffer)->header.seq);
-                            Network::write(cmstate.netstate, packet);
-                            std::cout << "<<Acking>>\n";
+                            pConn = &cmstate.localconn;
+                        }
+                        else
+                        {
+                            std::cout << "Weird: GENERAL Packet contains unknown ID\n";
                         }
                     }
-                    else
+                    pConn->checkintime = clock::now();
+                    cmstate.packets.push(request->packet);
+
+                    if (IsExpectsAck(request->packet))
                     {
-                        std::cout << "Weird: GENERAL Packet contains unknown ID\n";
+                        Packet packet;
+                        InitializePacket(packet,
+                                            request->packet.address,
+                                            MESG::HEADER::Codes::Ack,
+                                            ((MESG*)request->packet.buffer)->header.id,
+                                            0,
+                                            ((MESG*)request->packet.buffer)->header.seq);
+                        Network::write(cmstate.netstate, packet);
+                        std::cout << "<<Acking>>\n";
                     }
                 }
             }
@@ -441,7 +461,8 @@ ConnMan::ConnManIOHandler(
             code == (uint32_t)MESG::HEADER::Codes::General)
         {
             uint32_t cid = GetConnectionId(request->packet);
-            if (GetConnectionById(cmstate.connections, cid, &pConn))
+            pConn = GetConnectionById(cmstate.connections, cid);
+            if (pConn)
             {
                 if (IsExpectsAck(request->packet))
                 {

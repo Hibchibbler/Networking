@@ -117,7 +117,8 @@ struct ConnManState
         CLIENTLEAVE, // Server Side Event
         GRANTED,     // Client Side Event
         DENIED,      // Client Side Event
-        MESSAGE      // Event for All
+        MESSAGE,     // Event for All
+        STALECONNECTION
     };
     typedef void(*OnEvent)(void* oecontext, OnEventType t, Connection* conn, Packet* packet);
 
@@ -183,25 +184,11 @@ IsSizeValid(
     Packet & packet
 );
 
-bool
-IsGood2(
-    MESG::HEADER::Codes code,
-    Packet & packet
-);
-
 Connection*
 GetConnectionById(
     std::list<Connection> & connections,
     uint32_t id
 );
-
-bool
-GetConnectionById(
-    std::list<Connection> & connections,
-    uint32_t id,
-    Connection** connection
-);
-
 
 Connection*
 GetConnectionByName(
