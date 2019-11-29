@@ -154,14 +154,12 @@
   <ItemGroup>
     <ClInclude Include="CommMan.h" />
     <ClInclude Include="ConnMan.h" />
-    <ClInclude Include="ConnManUtil.h" />
     <ClInclude Include="Network.h" />
     <ClInclude Include="targetver.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="CommMan.cpp" />
     <ClCompile Include="ConnMan.cpp" />
-    <ClCompile Include="ConnManUtil.cpp" />
     <ClCompile Include="Network.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
