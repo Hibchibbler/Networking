@@ -120,16 +120,14 @@ public:
 struct ConnManState
 {
     enum class OnEventType {
-        CONNECTION_ADD,
-        CONNECTION_REMOVE,
+        CONNECTION_ADD,    // Server Side Event
+        CONNECTION_REMOVE, // Server Side Event
         ACK_TIMEOUT,
         ACK_RECEIVED,
-        CLIENTENTER, // Server Side Event
-        CLIENTLEAVE, // Server Side Event
         GRANTED,     // Client Side Event
         DENIED,      // Client Side Event
-        MESSAGE,     // Event for All
-        STALECONNECTION
+        MESSAGE,
+        CONNECTION_STALE
     };
     typedef void(*OnEvent)(void* oecontext, OnEventType t, Connection* conn, Packet* packet);
 

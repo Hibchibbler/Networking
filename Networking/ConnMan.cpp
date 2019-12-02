@@ -31,42 +31,8 @@ ConnMan::initialize(
 
     Network::initialize(cmstate.netstate, 8, port, ConnMan::ConnManIOHandler, &cmstate);
     Network::start(cmstate.netstate);
-
-    //cmstate.threadSender.handle = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)ConnMan::ConnManSenderHandler, &cmstate, 0, &cmstate.threadSender.id);
-
-    /*WaitForSingleObject(cmstate.threadSender.handle, INFINITE);
-    CloseHandle(cmstate.threadSender.handle);*/
 }
 
-//void
-//ConnMan::ConnManSenderHandler(
-//    void* state,
-//    Request* request,
-//    uint64_t id
-//)
-//{
-//    ConnManState& cmstate = *((ConnManState*)state);
-//    while (!cmstate.done)
-//    {
-//        while (!cmstate.txpacketsunreliable.empty())
-//        {
-//            Network::write(cmstate.netstate, cmstate.txpacketsunreliable.front());
-//            cmstate.txpacketsunreliable.pop();
-//        }
-//
-//        for (auto & c : cmstate.connections)
-//        {
-//            if (c.state == Connection::State::IDLE)
-//            {
-//                if (!c.txpacketsreliable.empty())
-//                {
-//                
-//                }
-//            }
-//        }
-//        Sleep(0);
-//    }
-//}
 
 uint64_t
 ConnMan::readyCount(
@@ -87,27 +53,6 @@ ConnMan::cleanup(
 {
     Network::stop(state.netstate);
     state.cmmutex.destroy();
-}
-
-MESG*
-InitializeMessage(
-    ConnManState & cmstate,
-    MESG::HEADER::Codes code,
-    uint32_t id,
-    Packet & packet,
-    bool inc
-)
-{
-    MESG* msg = (MESG*)packet.buffer;
-    Connection* conn = GetConnectionById(cmstate.connections, id);
-
-    memset(packet.buffer, 0, MAX_PACKET_SIZE);
-
-    AddMagic(msg);
-    msg->header.code = (uint8_t)code;//MESG::HEADER::Codes::General;
-    msg->header.id = conn->id;
-    msg->header.seq = (inc ? InterlockedIncrement(&conn->curseq) : 0);
-    return 0;
 }
 
 
@@ -132,8 +77,7 @@ ConnMan::SendReliable(
         AddMagic(pMsg);
         pMsg->header.code = (uint8_t)MESG::HEADER::Codes::General;
         pMsg->header.id = id;
-        pMsg->header.seq = 13;
-        ///
+        pMsg->header.seq = InterlockedIncrement(&pConn->curseq);
         pMsg->header.mode = (uint8_t)MESG::HEADER::Mode::Reliable;
 
         packet.ackhandler = ackhandler;
@@ -151,14 +95,24 @@ ConnMan::SendUnreliable(
 )
 {
     Packet packet;
-    MESG* msg = InitializeMessage(cmstate, MESG::HEADER::Codes::General, id, packet, true);
-    msg->header.mode = (uint8_t)MESG::HEADER::Mode::Unreliable;
+    Connection* pConn = GetConnectionById(cmstate.connections, id);
+    if (pConn)
+    {
+        memset(packet.buffer, 0, MAX_PACKET_SIZE);
+        packet.buffersize = sizeof(MESG::HEADER) + sizeof(GENERAL);
+        packet.address = pConn->who;
 
-    memcpy(msg->payload.general.buffer, buffer, buffersize);
-    packet.buffersize = sizeof(MESG::HEADER) + buffersize;
-    packet.ackhandler = nullptr;
+        MESG* pMsg = (MESG*)packet.buffer;
+        AddMagic(pMsg);
+        pMsg->header.code = (uint8_t)MESG::HEADER::Codes::General;
+        pMsg->header.id = id;
+        pMsg->header.seq = 13;
+        ///
+        pMsg->header.mode = (uint8_t)MESG::HEADER::Mode::Unreliable;
 
-    cmstate.txpacketsunreliable.push(packet);
+        packet.ackhandler = nullptr;
+        cmstate.txpacketsunreliable.push(packet);
+    }
 }
 
 uint64_t
@@ -286,8 +240,26 @@ ConnMan::SendAckTo(
     pMsg->header.code = (uint8_t)MESG::HEADER::Codes::Ack;
     pMsg->header.id = id;
     pMsg->header.seq = 13;
+    pMsg->payload.ack.ack = ack;
 
     cmstate.txpacketsunreliable.push(packet);
+}
+
+Connection*
+GetConnectionBase(
+    ConnManState& cmstate,
+    Packet& packet
+)
+{
+    Connection* pConn = nullptr;
+    uint32_t cid = 0;
+    cid = GetConnectionId(packet);
+    pConn = GetConnectionById(cmstate.connections, cid);
+    if (!pConn)
+    {
+        pConn = &cmstate.localconn;
+    }
+    return pConn;
 }
 
 void
@@ -320,12 +292,11 @@ ConnMan::updateServer(
         {
             if (!c.txpacketsreliable.empty())
             {
-                MESG* m = (MESG*)c.txpacketsreliable.front().buffer;
                 c.txpacketpending = c.txpacketsreliable.front();
                 c.state = Connection::State::WAITONACK;
                 c.acktime = clock::now();
 
-                Network::write(cmstate.netstate, c.txpacketsreliable.front());
+                Network::write(cmstate.netstate, c.txpacketpending);
                 c.txpacketsreliable.pop();
                 std::cout << "Popped Reliable Tx\n";
             }
@@ -339,18 +310,11 @@ ConnMan::updateServer(
     {
         Connection* pConn = nullptr;
         Packet packet;
-        uint32_t cid = 0;
 
         packet = cmstate.rxpackets.front();
         cmstate.rxpackets.pop();
-        cid = GetConnectionId(packet);
 
-        pConn = GetConnectionById(cmstate.connections, cid);
-        if (!pConn)
-        {
-            pConn = &cmstate.localconn;
-        }
-
+        pConn = GetConnectionBase(cmstate, packet);
         cmstate.onevent(cmstate.oneventcontext,
                         ConnManState::OnEventType::MESSAGE,
                         pConn,
@@ -368,10 +332,10 @@ ConnMan::updateServer(
         // Notify user, and drop Connection
         //
         duration d = clock::now() - c->checkintime;
-        if (d.count() > 5000)
+        if (d.count() > 100)
         {
             cmstate.onevent(cmstate.oneventcontext,
-                            ConnManState::OnEventType::STALECONNECTION,
+                            ConnManState::OnEventType::CONNECTION_STALE,
                             &(*c),
                             nullptr);
         }
@@ -379,9 +343,9 @@ ConnMan::updateServer(
         if (d.count() > 10000)
         {
             cmstate.onevent(cmstate.oneventcontext,
-                ConnManState::OnEventType::CONNECTION_REMOVE,
-                &(*c),
-                nullptr);
+                            ConnManState::OnEventType::CONNECTION_REMOVE,
+                            &(*c),
+                            nullptr);
             //c = cmstate.connections.erase(c);
             //continue;
         }
@@ -392,9 +356,7 @@ ConnMan::updateServer(
         if (c->state == Connection::State::WAITONACK)
         {
             duration dur = clock::now() - c->acktime;
-            //clock::time_point cur = clock::now();
-            //if ((cur - c->acktime).count() > 5000)
-            if (dur.count() > 5000)
+            if (dur.count() > 50)
             {
                 cmstate.onevent(cmstate.oneventcontext,
                                 ConnManState::OnEventType::ACK_TIMEOUT,
@@ -402,13 +364,6 @@ ConnMan::updateServer(
                                 &c->txpacketpending);
             }
         }
-        /*else if (c->state == Connection::State::ACKRECEIVED)
-        {
-            cmstate.onevent(cmstate.oneventcontext,
-                            ConnManState::OnEventType::ACK_RECEIVED,
-                            &(*c),
-                            nullptr);
-        }*/
     }
     cmstate.cmmutex.unlock();
 }
@@ -518,25 +473,8 @@ ConnMan::ConnManIOHandler(
                 {
                     // Rx'd an ACk. 
                     // Something is eagerly awaiting this i'm sure.
-
                     Connection* pConn;
-                    uint32_t cid = GetConnectionId(request->packet);
-                    pConn = GetConnectionById(cmstate.connections, cid);
-
-
-                    if (!pConn)
-                    {
-                        if (cid == (uint32_t)cmstate.localconn.id)
-                        {
-                            pConn = &cmstate.localconn;
-                        }
-                        else
-                        {
-                            std::cout << "Weird: GENERAL Packet contains unknown ID\n";
-                        }
-                    }
-
-
+                    pConn = GetConnectionBase(cmstate, request->packet);
                     if (pConn)
                     {
                         if (pConn->state == Connection::State::WAITONACK)
@@ -549,7 +487,7 @@ ConnMan::ConnManIOHandler(
                             if (ack == hope)
                             {
                                 pConn->state = Connection::State::ACKRECEIVED;
-
+                                std::cout << "Rx Ack: " << ack << std::endl;
                                 cmstate.onevent(cmstate.oneventcontext,
                                                 ConnManState::OnEventType::ACK_RECEIVED,
                                                 pConn,
@@ -618,42 +556,31 @@ ConnMan::ConnManIOHandler(
                     // Rx'd something other than Identify, or Ack
                     //
                     Connection* pConn = nullptr;
-                    uint32_t cid;
-                    
-                    cid = GetConnectionId(request->packet);
-                    pConn = GetConnectionById(cmstate.connections, cid);
-                    if (!pConn)
-                    {
-                        if (cid == (uint32_t)cmstate.localconn.id)
-                        {
-                            pConn = &cmstate.localconn;
-                        }
-                        else
-                        {
-                            std::cout << "Weird: GENERAL Packet contains unknown ID\n";
-                        }
-                    }
-
+                    pConn = GetConnectionBase(cmstate, request->packet);
                     if (pConn)
                     {
                         pConn->checkintime = clock::now();
-                    }
-                    cmstate.rxpackets.push(request->packet);
-                    ///////////////////////////////////////////////////////////////////////
-                    /*
-                    On Packet Receive, If packet is reliable, Then send Ack packet unreliably.
-                    */
-
-                    MESG* msg = (MESG*)request->packet.buffer;
-                    if (msg->header.mode == (uint8_t)MESG::HEADER::Mode::Reliable)
-                    {
-                        pConn = GetConnectionById(cmstate.connections, msg->header.id);
-                        if (!pConn)
+                        /*
+                            On Packet Receive, If packet is reliable, Then send Ack packet unreliably.
+                        */
+                        MESG* msg = (MESG*)request->packet.buffer;
+                        if (msg->header.mode == (uint8_t)MESG::HEADER::Mode::Reliable)
                         {
-                            SendAckTo(cmstate, pConn->who, pConn->id, msg->header.seq);
+                            if (msg->header.seq != 40)
+                            {
+                                SendAckTo(cmstate, pConn->who, pConn->id, msg->header.seq);
+                                std::cout << "Tx Ack: " << msg->header.seq << std::endl;
+                            }
+                            else
+                            {
+                                std::cout << "Debug: Not Tx Ack: " << msg->header.seq << std::endl;
+                            }
                         }
+                        cmstate.rxpackets.push(request->packet);
                     }
-
+                    else
+                    {
+                    }
                 }
             }
             else
@@ -675,47 +602,7 @@ ConnMan::ConnManIOHandler(
     }
     else if (request->ioType == Request::IOType::WRITE)
     {
-        /*
-        On Packet Send, If packet is general, and reliable,
-        Then connection must wait for Ack on reliable channel
-        */
-        //MESG* msg = (MESG*)request->packet.buffer;
-        //if (msg->header.code== (uint8_t)MESG::HEADER::Codes::General &&
-        //    msg->header.mode == (uint8_t)MESG::HEADER::Mode::Reliable)
-        //{
-        //    Connection* pConn = nullptr;
-        //    pConn = GetConnectionById(cmstate.connections, msg->header.id);
-        //    if (!pConn)
-        //    {
-        //   //     pConn->state = Connection::State::WAITONACK;
-        //        pConn->acktime = clock::now();
-        // //       pConn->txpacketpending = request->packet;
-        //    }
-        //}
 
-
-        // Debug Print buffer
-        //PrintMsgHeader(request->packet, false);
-        //Connection* pConn;
-        //uint32_t code = GetMesg(request->packet)->header.code;
-        //if (code == (uint32_t)MESG::HEADER::Codes::Ack &&
-        //    code == (uint32_t)MESG::HEADER::Codes::General)
-        //{
-        //    uint32_t cid = GetConnectionId(request->packet);
-        //    pConn = GetConnectionById(cmstate.connections, cid);
-        //    if (pConn)
-        //    {
-        //        if (IsExpectsAck(request->packet))
-        //        {
-        //            pConn->state = Connection::State::WAITONACK;
-        //            pConn->starttime = clock::now();
-        //        }
-        //    }
-        //    else
-        //    {
-        //        std::cout << "Weird: Outgoing Packet contains unknown ID!\n";
-        //    }
-        //}
     }
     return;
 }
