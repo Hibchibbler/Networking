@@ -122,12 +122,13 @@ class Packet
             if (this != &packet)
             {
                 memcpy(buffer, packet.buffer, MAX_PACKET_SIZE);
+                ackhandler = packet.ackhandler;
                 buffersize = packet.buffersize;
                 address = packet.address;
             }
             return *this;
         }
-
+        void*           ackhandler;
         Address         address;
         uint32_t        buffersize;
         UCHAR           buffer[MAX_PACKET_SIZE];
@@ -149,7 +150,6 @@ public:
         this->wsaoverlapped.OffsetHigh = 0;
         this->wsaoverlapped.hEvent = 0;
         inuse = OVERLAP_STATUS_NOT_INUSE;
-        reuse = 0;
     }
     // WSAOVERLAPPED must be first member
     WSAOVERLAPPED       wsaoverlapped;
@@ -157,7 +157,6 @@ public:
     IOType              ioType;
     uint32_t            index;
     uint32_t            inuse;
-    uint32_t            reuse;
 
     Packet              packet;
 };

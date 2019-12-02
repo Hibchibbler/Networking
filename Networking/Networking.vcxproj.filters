@@ -27,15 +27,18 @@
     <ClInclude Include="CommMan.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="SlabPool.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="Network.cpp">
-      <Filter>Header Files</Filter>
-    </ClCompile>
     <ClCompile Include="ConnMan.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="CommMan.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Network.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

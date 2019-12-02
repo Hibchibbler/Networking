@@ -31,8 +31,42 @@ ConnMan::initialize(
 
     Network::initialize(cmstate.netstate, 8, port, ConnMan::ConnManIOHandler, &cmstate);
     Network::start(cmstate.netstate);
+
+    //cmstate.threadSender.handle = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)ConnMan::ConnManSenderHandler, &cmstate, 0, &cmstate.threadSender.id);
+
+    /*WaitForSingleObject(cmstate.threadSender.handle, INFINITE);
+    CloseHandle(cmstate.threadSender.handle);*/
 }
 
+//void
+//ConnMan::ConnManSenderHandler(
+//    void* state,
+//    Request* request,
+//    uint64_t id
+//)
+//{
+//    ConnManState& cmstate = *((ConnManState*)state);
+//    while (!cmstate.done)
+//    {
+//        while (!cmstate.txpacketsunreliable.empty())
+//        {
+//            Network::write(cmstate.netstate, cmstate.txpacketsunreliable.front());
+//            cmstate.txpacketsunreliable.pop();
+//        }
+//
+//        for (auto & c : cmstate.connections)
+//        {
+//            if (c.state == Connection::State::IDLE)
+//            {
+//                if (!c.txpacketsreliable.empty())
+//                {
+//                
+//                }
+//            }
+//        }
+//        Sleep(0);
+//    }
+//}
 
 uint64_t
 ConnMan::readyCount(
@@ -55,6 +89,78 @@ ConnMan::cleanup(
     state.cmmutex.destroy();
 }
 
+MESG*
+InitializeMessage(
+    ConnManState & cmstate,
+    MESG::HEADER::Codes code,
+    uint32_t id,
+    Packet & packet,
+    bool inc
+)
+{
+    MESG* msg = (MESG*)packet.buffer;
+    Connection* conn = GetConnectionById(cmstate.connections, id);
+
+    memset(packet.buffer, 0, MAX_PACKET_SIZE);
+
+    AddMagic(msg);
+    msg->header.code = (uint8_t)code;//MESG::HEADER::Codes::General;
+    msg->header.id = conn->id;
+    msg->header.seq = (inc ? InterlockedIncrement(&conn->curseq) : 0);
+    return 0;
+}
+
+
+void
+ConnMan::SendReliable(
+    ConnManState & cmstate,
+    uint32_t id,
+    uint8_t* buffer,
+    uint32_t buffersize,
+    AcknowledgeHandler ackhandler
+)
+{
+    Packet packet;
+    Connection* pConn = GetConnectionById(cmstate.connections, id);
+    if (pConn)
+    {
+        memset(packet.buffer, 0, MAX_PACKET_SIZE);
+        packet.buffersize = sizeof(MESG::HEADER) + sizeof(GENERAL);
+        packet.address = pConn->who;
+
+        MESG* pMsg = (MESG*)packet.buffer;
+        AddMagic(pMsg);
+        pMsg->header.code = (uint8_t)MESG::HEADER::Codes::General;
+        pMsg->header.id = id;
+        pMsg->header.seq = 13;
+        ///
+        pMsg->header.mode = (uint8_t)MESG::HEADER::Mode::Reliable;
+
+        packet.ackhandler = ackhandler;
+        pConn->txpacketsreliable.push(packet);
+    }
+}
+
+
+void
+ConnMan::SendUnreliable(
+    ConnManState & cmstate,
+    uint32_t id,
+    uint8_t* buffer,
+    uint32_t buffersize
+)
+{
+    Packet packet;
+    MESG* msg = InitializeMessage(cmstate, MESG::HEADER::Codes::General, id, packet, true);
+    msg->header.mode = (uint8_t)MESG::HEADER::Mode::Unreliable;
+
+    memcpy(msg->payload.general.buffer, buffer, buffersize);
+    packet.buffersize = sizeof(MESG::HEADER) + buffersize;
+    packet.ackhandler = nullptr;
+
+    cmstate.txpacketsunreliable.push(packet);
+}
+
 uint64_t
 ConnMan::sendIdentifyTo(
     ConnManState & cmstate,
@@ -64,29 +170,8 @@ ConnMan::sendIdentifyTo(
     std::string gamepass
 )
 {
-    Packet ipacket;
+    Packet packet;
     uint32_t traits = 0;
-
-    InitializePacket(ipacket,
-                        to,
-                        MESG::HEADER::Codes::Identify,
-                        0,
-                        traits, 0);
-
-    MESG* pMsg = (MESG*)ipacket.buffer;
-    memcpy(pMsg->payload.identify.playername,
-            playername.c_str(),
-            playername.size());
-
-    memcpy(pMsg->payload.identify.gamename,
-            gamename.c_str(),
-            gamename.size());
-
-    memcpy(pMsg->payload.identify.gamepass,
-            gamepass.c_str(),
-            gamepass.size());
-
-    Network::write(cmstate.netstate, ipacket);
 
     //
     // Let's put a new connection into the list
@@ -103,6 +188,30 @@ ConnMan::sendIdentifyTo(
 
     cmstate.localconn = connection;
 
+    memset(packet.buffer, 0, MAX_PACKET_SIZE);
+    packet.buffersize = sizeof(MESG::HEADER) + sizeof(IDENTIFY);
+    packet.address = to;
+
+    MESG* pMsg = (MESG*)packet.buffer;
+    AddMagic(pMsg);
+    pMsg->header.code = (uint8_t)MESG::HEADER::Codes::Identify;
+    pMsg->header.id = 0;
+    pMsg->header.seq = 7;
+
+    memcpy(pMsg->payload.identify.playername,
+           playername.c_str(),
+           playername.size());
+
+    memcpy(pMsg->payload.identify.gamename,
+           gamename.c_str(),
+           gamename.size());
+
+    memcpy(pMsg->payload.identify.gamepass,
+           gamepass.c_str(),
+           gamepass.size());
+
+    cmstate.txpacketsunreliable.push(packet);
+
     return 0;
 }
 
@@ -115,25 +224,21 @@ ConnMan::sendGrantTo(
 )
 {
     Packet packet;
-    uint32_t traits = 0;
-
-    InitializePacket(packet,
-                     to,
-                     MESG::HEADER::Codes::Grant,
-                     id,
-                     traits, 0);
+    memset(packet.buffer, 0, MAX_PACKET_SIZE);
+    packet.buffersize = sizeof(MESG::HEADER) + sizeof(GRANT);
+    packet.address = to;
 
     MESG* pMsg = (MESG*)packet.buffer;
+    AddMagic(pMsg);
+    pMsg->header.code = (uint8_t)MESG::HEADER::Codes::Grant;
+    pMsg->header.id = id;
+    pMsg->header.seq = 13;
 
     memcpy(pMsg->payload.identify.playername,
            playername.c_str(),
            playername.size());
 
-    Network::write(cmstate.netstate, packet);
-    //
-    // Per Connection state is not available,
-    // caller must set that up.
-    //
+    cmstate.txpacketsunreliable.push(packet);
     return 0;
 }
 
@@ -145,25 +250,44 @@ ConnMan::sendDenyTo(
 )
 {
     Packet packet;
-    uint32_t traits = 0;
-
-    InitializePacket(packet,
-                     to,
-                     MESG::HEADER::Codes::Deny,
-                     0,
-                     traits, 0);
+    memset(packet.buffer, 0, MAX_PACKET_SIZE);
+    packet.buffersize = sizeof(MESG::HEADER) + sizeof(DENY);
+    packet.address = to;
 
     MESG* pMsg = (MESG*)packet.buffer;
+    AddMagic(pMsg);
+    pMsg->header.code = (uint8_t)MESG::HEADER::Codes::Deny;
+    pMsg->header.id = 0;
+    pMsg->header.seq = 13;
 
     memcpy(pMsg->payload.identify.playername,
            playername.c_str(),
            playername.size());
 
-    Network::write(cmstate.netstate, packet);
-    //
-    // Per Connection state is not available
-    //
+    cmstate.txpacketsunreliable.push(packet);
     return 0;
+}
+
+void
+ConnMan::SendAckTo(
+    ConnManState & cmstate,
+    Address to,
+    uint32_t id,
+    uint32_t ack
+)
+{
+    Packet packet;
+    memset(packet.buffer, 0, MAX_PACKET_SIZE);
+    packet.buffersize = sizeof(MESG::HEADER) + sizeof(ACK);
+    packet.address = to;
+
+    MESG* pMsg = (MESG*)packet.buffer;
+    AddMagic(pMsg);
+    pMsg->header.code = (uint8_t)MESG::HEADER::Codes::Ack;
+    pMsg->header.id = id;
+    pMsg->header.seq = 13;
+
+    cmstate.txpacketsunreliable.push(packet);
 }
 
 void
@@ -176,16 +300,49 @@ ConnMan::updateServer(
     cmstate.timeticks += ms_elapsed;
     cmstate.cmmutex.lock();
     //
-    // Service the packets
+    // Service outgoing unreliable packets
     //
-    while (!cmstate.packets.empty())
+    while (!cmstate.txpacketsunreliable.empty())
+    {
+        Network::write(cmstate.netstate, cmstate.txpacketsunreliable.front());
+        cmstate.txpacketsunreliable.pop();
+        std::cout << "Popped Unreliable Tx\n";
+    }
+
+    // Service outgoing reliable packets.
+    //
+    // We are only going to send a packet
+    // if we are not currently waiting for an ack
+    // from last packet.
+    for (auto & c : cmstate.connections)
+    {
+        if (c.state == Connection::State::IDLE)
+        {
+            if (!c.txpacketsreliable.empty())
+            {
+                MESG* m = (MESG*)c.txpacketsreliable.front().buffer;
+                c.txpacketpending = c.txpacketsreliable.front();
+                c.state = Connection::State::WAITONACK;
+                c.acktime = clock::now();
+
+                Network::write(cmstate.netstate, c.txpacketsreliable.front());
+                c.txpacketsreliable.pop();
+                std::cout << "Popped Reliable Tx\n";
+            }
+        }
+    }
+
+    //
+    // Service incoming packets
+    //
+    while (!cmstate.rxpackets.empty())
     {
         Connection* pConn = nullptr;
         Packet packet;
         uint32_t cid = 0;
 
-        packet = cmstate.packets.front();
-        cmstate.packets.pop();
+        packet = cmstate.rxpackets.front();
+        cmstate.rxpackets.pop();
         cid = GetConnectionId(packet);
 
         pConn = GetConnectionById(cmstate.connections, cid);
@@ -202,36 +359,56 @@ ConnMan::updateServer(
     }
 
     //
-    // Update the connections
+    // Update the connection states, and raise interesting facts.
     //
-    for (auto & c : cmstate.connections)
+    for (auto c = cmstate.connections.begin(); c != cmstate.connections.end(); c++)
     {
         //
-        // Connection hasn't seen traffic in over 5 seconds
-        // Notify user.
+        // Connection hasn't seen traffic in over 10 seconds
+        // Notify user, and drop Connection
         //
-        duration d = clock::now() - c.checkintime;
+        duration d = clock::now() - c->checkintime;
         if (d.count() > 5000)
         {
             cmstate.onevent(cmstate.oneventcontext,
                             ConnManState::OnEventType::STALECONNECTION,
-                            &c,
+                            &(*c),
                             nullptr);
+        }
 
-            c.checkintime = clock::now();
+        if (d.count() > 10000)
+        {
+            cmstate.onevent(cmstate.oneventcontext,
+                ConnManState::OnEventType::CONNECTION_REMOVE,
+                &(*c),
+                nullptr);
+            //c = cmstate.connections.erase(c);
+            //continue;
         }
 
         //
         // Time out those waiting for an ACK
         //
-        if (c.state == Connection::State::WAITONACK)
+        if (c->state == Connection::State::WAITONACK)
         {
-            clock::time_point cur = clock::now();
-            if ((cur - c.starttime).count() > 5000)
+            duration dur = clock::now() - c->acktime;
+            //clock::time_point cur = clock::now();
+            //if ((cur - c->acktime).count() > 5000)
+            if (dur.count() > 5000)
             {
-                c.state = Connection::State::ACKNOTRECEIVED;
+                cmstate.onevent(cmstate.oneventcontext,
+                                ConnManState::OnEventType::ACK_TIMEOUT,
+                                &(*c),
+                                &c->txpacketpending);
             }
         }
+        /*else if (c->state == Connection::State::ACKRECEIVED)
+        {
+            cmstate.onevent(cmstate.oneventcontext,
+                            ConnManState::OnEventType::ACK_RECEIVED,
+                            &(*c),
+                            nullptr);
+        }*/
     }
     cmstate.cmmutex.unlock();
 }
@@ -300,9 +477,10 @@ ConnMan::ConnManIOHandler(
                                     connection.checkintime = clock::now();
                                     connection.conntype = Connection::ConnectionType::REMOTE;
                                     connection.level = Connection::AuthLevel::UNAUTH;
+                                    connection.curseq = 0;
                                     cmstate.connections.push_back(connection);
                                     cmstate.onevent(cmstate.oneventcontext,
-                                                    ConnManState::OnEventType::CLIENTENTER,
+                                                    ConnManState::OnEventType::CONNECTION_ADD,
                                                     &connection,
                                                     &request->packet);
                                     std::cout << "Tx Grant: " << random_integer << "\n";
@@ -340,13 +518,52 @@ ConnMan::ConnManIOHandler(
                 {
                     // Rx'd an ACk. 
                     // Something is eagerly awaiting this i'm sure.
+
                     Connection* pConn;
                     uint32_t cid = GetConnectionId(request->packet);
                     pConn = GetConnectionById(cmstate.connections, cid);
+
+
+                    if (!pConn)
+                    {
+                        if (cid == (uint32_t)cmstate.localconn.id)
+                        {
+                            pConn = &cmstate.localconn;
+                        }
+                        else
+                        {
+                            std::cout << "Weird: GENERAL Packet contains unknown ID\n";
+                        }
+                    }
+
+
                     if (pConn)
                     {
-                        pConn->state = Connection::State::ACKRECEIVED;
-                        std::cout << "Rx ACK\n";
+                        if (pConn->state == Connection::State::WAITONACK)
+                        {
+                            MESG* pMsg = (MESG*)request->packet.buffer;
+
+                            uint32_t ack = pMsg->payload.ack.ack;
+                            uint32_t hope = ((MESG*)pConn->txpacketpending.buffer)->header.seq;
+
+                            if (ack == hope)
+                            {
+                                pConn->state = Connection::State::ACKRECEIVED;
+
+                                cmstate.onevent(cmstate.oneventcontext,
+                                                ConnManState::OnEventType::ACK_RECEIVED,
+                                                pConn,
+                                                &pConn->txpacketpending);
+                            }
+                            else
+                            {
+                                std::cout << "Weird: received an Ack for wrong sequence. " << ack << ",  " << hope << std::endl;
+                            }
+                        }
+                        else
+                        {
+                            std::cout << "Weird: received an Ack but wasn't expecting it." << std::endl;
+                        }
                     }
                     else
                     {
@@ -416,21 +633,27 @@ ConnMan::ConnManIOHandler(
                             std::cout << "Weird: GENERAL Packet contains unknown ID\n";
                         }
                     }
-                    pConn->checkintime = clock::now();
-                    cmstate.packets.push(request->packet);
 
-                    if (IsExpectsAck(request->packet))
+                    if (pConn)
                     {
-                        Packet packet;
-                        InitializePacket(packet,
-                                            request->packet.address,
-                                            MESG::HEADER::Codes::Ack,
-                                            ((MESG*)request->packet.buffer)->header.id,
-                                            0,
-                                            ((MESG*)request->packet.buffer)->header.seq);
-                        Network::write(cmstate.netstate, packet);
-                        std::cout << "<<Acking>>\n";
+                        pConn->checkintime = clock::now();
                     }
+                    cmstate.rxpackets.push(request->packet);
+                    ///////////////////////////////////////////////////////////////////////
+                    /*
+                    On Packet Receive, If packet is reliable, Then send Ack packet unreliably.
+                    */
+
+                    MESG* msg = (MESG*)request->packet.buffer;
+                    if (msg->header.mode == (uint8_t)MESG::HEADER::Mode::Reliable)
+                    {
+                        pConn = GetConnectionById(cmstate.connections, msg->header.id);
+                        if (!pConn)
+                        {
+                            SendAckTo(cmstate, pConn->who, pConn->id, msg->header.seq);
+                        }
+                    }
+
                 }
             }
             else
@@ -452,28 +675,47 @@ ConnMan::ConnManIOHandler(
     }
     else if (request->ioType == Request::IOType::WRITE)
     {
+        /*
+        On Packet Send, If packet is general, and reliable,
+        Then connection must wait for Ack on reliable channel
+        */
+        //MESG* msg = (MESG*)request->packet.buffer;
+        //if (msg->header.code== (uint8_t)MESG::HEADER::Codes::General &&
+        //    msg->header.mode == (uint8_t)MESG::HEADER::Mode::Reliable)
+        //{
+        //    Connection* pConn = nullptr;
+        //    pConn = GetConnectionById(cmstate.connections, msg->header.id);
+        //    if (!pConn)
+        //    {
+        //   //     pConn->state = Connection::State::WAITONACK;
+        //        pConn->acktime = clock::now();
+        // //       pConn->txpacketpending = request->packet;
+        //    }
+        //}
+
+
         // Debug Print buffer
         //PrintMsgHeader(request->packet, false);
-        Connection* pConn;
-        uint32_t code = GetMesg(request->packet)->header.code;
-        if (code == (uint32_t)MESG::HEADER::Codes::Ack &&
-            code == (uint32_t)MESG::HEADER::Codes::General)
-        {
-            uint32_t cid = GetConnectionId(request->packet);
-            pConn = GetConnectionById(cmstate.connections, cid);
-            if (pConn)
-            {
-                if (IsExpectsAck(request->packet))
-                {
-                    pConn->state = Connection::State::WAITONACK;
-                    pConn->starttime = clock::now();
-                }
-            }
-            else
-            {
-                std::cout << "Weird: Outgoing Packet contains unknown ID!\n";
-            }
-        }
+        //Connection* pConn;
+        //uint32_t code = GetMesg(request->packet)->header.code;
+        //if (code == (uint32_t)MESG::HEADER::Codes::Ack &&
+        //    code == (uint32_t)MESG::HEADER::Codes::General)
+        //{
+        //    uint32_t cid = GetConnectionId(request->packet);
+        //    pConn = GetConnectionById(cmstate.connections, cid);
+        //    if (pConn)
+        //    {
+        //        if (IsExpectsAck(request->packet))
+        //        {
+        //            pConn->state = Connection::State::WAITONACK;
+        //            pConn->starttime = clock::now();
+        //        }
+        //    }
+        //    else
+        //    {
+        //        std::cout << "Weird: Outgoing Packet contains unknown ID!\n";
+        //    }
+        //}
     }
     return;
 }
@@ -484,7 +726,7 @@ AddMagic(
     MESG* pMsg
 )
 {
-    memcpy(pMsg->header.magic, "ABCD", 4);
+    memcpy(pMsg->header.magic, "AB", 2);
 }
 
 uint32_t
@@ -497,6 +739,7 @@ SizeofPayload(
     if (code == MESG::HEADER::Codes::Grant) { payloadSize += sizeof(GRANT); }
     if (code == MESG::HEADER::Codes::Deny) { payloadSize += sizeof(DENY); }
     if (code == MESG::HEADER::Codes::General) { payloadSize += sizeof(GENERAL); }
+    if (code == MESG::HEADER::Codes::Ack) { payloadSize += sizeof(ACK); }
 
     return payloadSize;
 }
@@ -504,23 +747,23 @@ SizeofPayload(
 uint64_t
 InitializePacket(
     Packet & packet,
+    void* ackhandler,
     Address & who,
     MESG::HEADER::Codes code,
     uint32_t id,
-    uint32_t traits,
     uint32_t seq
 )
 {
-    MESG* pMsg = (MESG*)packet.buffer;
-    packet.buffersize = sizeof(MESG::HEADER) + SizeofPayload(code);
-    packet.address = who;
+    //MESG* pMsg = (MESG*)packet.buffer;
+    //packet.ackhandler = ackhandler;
+    //packet.buffersize = sizeof(MESG::HEADER) + SizeofPayload(code);
+    //packet.address = who;
 
-    memcpy(pMsg->header.magic, "ABCD", 4);
-    pMsg->header.code = (uint32_t)code;
-    pMsg->header.id = id;
-    pMsg->header.traits = traits;
-    pMsg->header.seq = seq;
-    pMsg->header.crc = 0;
+    //memcpy(pMsg->header.magic, "AB", 2);
+    //pMsg->header.code = (uint32_t)code;
+    //pMsg->header.id = id;
+    //pMsg->header.seq = seq;
+
     return 0;
 }
 
@@ -547,9 +790,7 @@ IsMagicGood(
 {
     bool ret = false;
     if (packet.buffer[0] == 65 &&
-        packet.buffer[1] == 66 &&
-        packet.buffer[2] == 67 &&
-        packet.buffer[3] == 68)
+        packet.buffer[1] == 66)
     {
         ret = true;
     }
@@ -605,7 +846,7 @@ IsExpectsAck(
 {
     bool expectation = false;
     MESG* RxMsg = (MESG*)packet.buffer;
-    if (RxMsg->header.traits & (1ul << (uint32_t)MESG::HEADER::Traits::ACK))
+    //if (RxMsg->header.traits & (1ul << (uint32_t)MESG::HEADER::Traits::ACK))
     {
         expectation = true;
     }
@@ -665,9 +906,9 @@ PrintMsgHeader(
     }
     //std::cout << "\tCode:   " << std::hex << pDbgMsg->header.code << "\n";
     std::cout << "  Id:     " << std::hex << pDbgMsg->header.id << "\n";
-    std::cout << "  Traits: " << std::hex << pDbgMsg->header.traits << "\n";
+    //std::cout << "  Traits: " << std::hex << pDbgMsg->header.traits << "\n";
     std::cout << "  Seq:    " << std::hex << pDbgMsg->header.seq << "\n";
-    std::cout << "  Crc:    " << std::hex << pDbgMsg->header.crc << "\n";
+    //std::cout << "  Crc:    " << std::hex << pDbgMsg->header.crc << "\n";
 }
 
 bool

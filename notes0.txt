@@ -76,9 +76,112 @@ XY 00 00 00
 00 00 00 00 
 00 00 00 00 
 00 00 00 00 
+/////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////
+//// Daniel J Ferguson
+//// 2019
+/////////////////////////////////////////////////////////////////////////////////
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
+#include <iostream>
+#include <conio.h>
+
+#include "Networking\ConnMan.h"
+#include <vector>
+#include <chrono>
+#include <string>
+
+#include <windows.h>
+using namespace bali;
+
+bool gAbort = false;
+Thread gInputThread;
+Thread gStateMonitorThread;
+
+BOOL
+WINAPI
+SignalFunction(
+    _In_ DWORD dwCtrlType
+);
+
+int main(int argc, char** argv)
+{
+    //
+    // Handle Ctrl-C 
+    // Ctrl-C sets Abort = true
+    //
+    SetConsoleCtrlHandler(SignalFunction, TRUE);
+
+    //
+    // Start service threads
+    //
+    gInputThread.handle = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)InputFunction, &cmstate, 0, &gInputThread.id);
+    gStateMonitorThread.handle = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)StateMonitorFunction, &cmstate, 0, &gStateMonitorThread.id);
+
+    //
+    // Pump the pump
+    //
+    while (!gAbort)
+    {
+        Sleep(0);
+    }
+
+    //
+    // Wait for all service threads to stop
+    //
+    WaitForSingleObject(gInputThread.handle, INFINITE);
+    WaitForSingleObject(gStateMonitorThread.handle, INFINITE);
+
+    return 0;
+}
+
+void
+InputFunction(
+    void* p
+)
+{
 
 
-//////////////////////////////////////////
+    while (!gAbort)
+    {
+        Sleep(0);
+
+     
+    }
+
+}
+
+void
+StateMonitorFunction(
+    void* p
+)
+{
+
+    while (!gAbort)
+    {
+
+        Sleep(0);
+    }
+}
+
+BOOL
+WINAPI
+SignalFunction(
+    _In_ DWORD dwCtrlType
+)
+{
+    switch (dwCtrlType)
+    {
+    case CTRL_C_EVENT:
+        std::cout << "Aborting...\n";
+        gAbort = true;
+        // Signal is handled - don't pass it on to the next handler
+        return TRUE;
+    default:
+        // Pass signal on to the next handler
+        return FALSE;
+    }
+}
+/////////////////////////////////////////////////////////////////////////////
                 if (IsCode(request->packet, MESG::HEADER::Codes::Identify))
                 {
                     // Rx'd an IDENTIFY packet.

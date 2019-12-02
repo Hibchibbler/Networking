@@ -34,11 +34,12 @@ struct DENY
 
 struct GENERAL
 {
-    uint8_t buffer[1024];
+    uint8_t buffer[MAX_PACKET_SIZE-128];
 };
 
 struct ACK
 {
+    uint32_t ack;
 };
 
 
@@ -50,30 +51,28 @@ struct MESG
             Identify,
             Grant,
             Deny,
-            Ack,
-            General
+            General,
+            Ack
         };
 
-        enum class Traits {
-            ACK = 0
+        enum class Mode {
+            Reliable,
+            Unreliable
         };
-        char magic[4];
-        uint32_t code;
-        uint32_t id;
-        uint32_t traits;
+        uint8_t magic[2];
+        uint8_t code;
+        uint8_t mode;
+        uint16_t id;
         uint32_t seq;
-        uint32_t crc;
+
     }header;
 
     union {
-        uint8_t     buffer[1024]; // Packet expects MESG to be <= 1280
-
         IDENTIFY    identify;   // Client Rx
         GRANT       grant;      // Server Rx
         DENY        deny;       // Server Rx
-        ACK         ack;
         GENERAL     general;    // Client Rx & Server Rx
-
+        ACK         ack;
     }payload;
 };
 
@@ -103,15 +102,28 @@ public:
     uint32_t            id;
     Address             who;
     ConnectionType      conntype;
+
+    uint32_t            curseq;
+    uint32_t            curack;
+
     clock::time_point   checkintime;
     clock::time_point   starttime;
     clock::time_point   endtime;
+
     std::list<duration> pingtimes;
+
+    clock::time_point   acktime;
+    std::queue<Packet>  txpacketsreliable; // Reliability is managed per-connection
+    Packet              txpacketpending; //we only send 1 reliable message at a time, so,,
 };
 
 struct ConnManState
 {
     enum class OnEventType {
+        CONNECTION_ADD,
+        CONNECTION_REMOVE,
+        ACK_TIMEOUT,
+        ACK_RECEIVED,
         CLIENTENTER, // Server Side Event
         CLIENTLEAVE, // Server Side Event
         GRANTED,     // Client Side Event
@@ -133,10 +145,14 @@ struct ConnManState
 
     NetworkState            netstate;
     Mutex                   cmmutex;
-    Thread                  threadConnMan;
+    //Thread                  threadSender;
     std::list<Connection>   connections;
+
     Connection              localconn;
-    std::queue<Packet>      packets;
+
+    std::queue<Packet>      rxpackets;
+    std::queue<Packet>      txpacketsunreliable;
+
     OnEvent                 onevent;
     void*                   oneventcontext;
 };
@@ -179,6 +195,38 @@ public:
         ConnManState & cmstate
     );
 
+    typedef void (*AcknowledgeHandler)(uint32_t code);
+
+    static
+    void
+    SendReliable(
+        ConnManState & cmstate,
+        uint32_t id,
+        uint8_t* buffer,
+        uint32_t buffersize,
+        AcknowledgeHandler ackhandler
+    );
+
+    static
+    void
+    SendUnreliable(
+        ConnManState & cmstate,
+        uint32_t id,
+        uint8_t* buffer,
+        uint32_t buffersize
+    );
+
+    static
+    void
+    SendAckTo(
+        ConnManState & cmstate,
+        Address to,
+        uint32_t id,
+        uint32_t ack
+    );
+
+
+
     static
     void
     ConnManIOHandler(
@@ -186,6 +234,13 @@ public:
         Request* request,
         uint64_t id
     );
+
+    //static
+    //void ConnManSenderHandler(
+    //    void* state,
+    //    Request* request,
+    //    uint64_t id
+    //);
 
     static
     uint64_t
@@ -240,10 +295,10 @@ SizeofPayload(
 uint64_t
 InitializePacket(
     Packet & packet,
+    void* ackhandler,
     Address & who,
     MESG::HEADER::Codes code,
     uint32_t id,
-    uint32_t traits,
     uint32_t seq
 );
 
