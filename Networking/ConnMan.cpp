@@ -123,6 +123,44 @@ ConnMan::SendUnreliable(
     }
 }
 
+void
+ConnMan::SendPing(
+    ConnManState & cmstate,
+    Address to,
+    uint32_t id,
+    bool ping
+)
+{
+    Packet packet;
+    Connection* pConn = GetConnectionById(cmstate.connections, id);
+    if (pConn)
+    {
+        memset(packet.buffer, 0, MAX_PACKET_SIZE);
+        packet.buffersize = sizeof(MESG::HEADER) + sizeof(PINGPONG);
+        packet.address = to;
+
+        MESG* pMsg = (MESG*)packet.buffer;
+        AddMagic(pMsg);
+        if (ping) {
+            pMsg->header.code = (uint8_t)MESG::HEADER::Codes::Ping;
+        }
+        else
+        {
+            pMsg->header.code = (uint8_t)MESG::HEADER::Codes::Pong;
+        }
+        pMsg->header.id = id;
+        pMsg->header.seq = InterlockedIncrement(&pConn->curuseq);
+        ///
+        pMsg->header.mode = (uint8_t)MESG::HEADER::Mode::Unreliable;
+
+        packet.ackhandler = nullptr;
+
+        pConn->pingstart = clock::now();
+        std::cout << "Push Unreliable: " << CodeName[pMsg->header.code] << std::endl;
+        cmstate.txpacketsunreliable.push(packet);
+    }
+}
+
 uint64_t
 ConnMan::sendIdentifyTo(
     ConnManState & cmstate,
@@ -363,12 +401,14 @@ ConnMan::updateServer(
         // Connection hasn't seen traffic in over 10 seconds
         // Notify user, and drop Connection
         //
-        duration d = clock::now() - conniter->checkintime;
-        if (d.count() > cmstate.stale_ms)
+        duration hb = clock::now() - conniter->heartbeat;
+        if (hb.count() > cmstate.heartbeat_ms)
         {
-            
+            conniter->heartbeat = clock::now();
+            ConnMan::SendPing(cmstate, conniter->who, conniter->id, true);
         }
 
+        duration d = clock::now() - conniter->checkintime;
         if (d.count() > cmstate.stale_ms)
         {
             cmstate.onevent(cmstate.oneventcontext,
@@ -456,6 +496,7 @@ ConnMan::ConnManIOHandler(
                                     connection.who = request->packet.address;
                                     connection.state = Connection::State::IDLE;
                                     connection.checkintime = clock::now();
+                                    connection.heartbeat = clock::now();
                                     connection.curseq = 0;
                                     connection.curack = 0;
                                     connection.highseq = 0;
@@ -568,6 +609,35 @@ ConnMan::ConnManIOHandler(
                     else
                     {
                         std::cout << "Problem: Rx'd ACK Packet contains unknown ID!\n";
+                    }
+                }
+                else if (IsCode(request->packet, MESG::HEADER::Codes::Ping))
+                {
+                    Connection* pConn;
+                    pConn = GetConnectionBase(cmstate, request->packet);
+                    if (pConn)
+                    {
+                        ConnMan::SendPing(cmstate, pConn->who, pConn->id, false); // Pong
+                    }
+                }
+                else if (IsCode(request->packet, MESG::HEADER::Codes::Pong))
+                {
+                    Connection* pConn;
+                    pConn = GetConnectionBase(cmstate, request->packet);
+                    if (pConn)
+                    {
+                        pConn->pingend = clock::now();
+                        duration d = pConn->pingend - pConn->pingstart;
+
+                        if (pConn->pingtimes.size() > 15)
+                            pConn->pingtimes.pop_front();
+                        pConn->pingtimes.push_back(d);
+                        pConn->avgping = 0;
+                        for (auto d : pConn->pingtimes)
+                        {
+                            pConn->avgping += d.count();
+                        }
+                        pConn->avgping /= pConn->pingtimes.size();
                     }
                 }
                 else

@@ -1,4 +1,4 @@
-heartbeat_ms=100
+heartbeat_ms=4000
 stale_ms=5000
 remove_ms=10000
 acktimeout_ms=5

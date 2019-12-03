@@ -91,7 +91,9 @@ static const char* CodeName[] = {
     "Grant",
     "Deny",
     "General",
-    "Ack"
+    "Ack",
+    "Ping",
+    "Pong"
 };
 
 class Connection
@@ -122,7 +124,12 @@ public:
     clock::time_point   starttime;
     clock::time_point   endtime;
 
+    clock::time_point   heartbeat;
+    clock::time_point   pingstart;
+    clock::time_point   pingend;
+
     std::list<duration> pingtimes;
+    uint64_t            avgping;
 
     clock::time_point   acktime;
     std::queue<Packet>  txpacketsreliable; // Reliability is managed per-connection
@@ -245,7 +252,14 @@ public:
         uint32_t ack
     );
 
-
+    static 
+    void
+    SendPing(
+        ConnManState & cmstate,
+        Address to,
+        uint32_t id,
+        bool ping
+    );
 
     static
     void
