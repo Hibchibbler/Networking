@@ -26,6 +26,7 @@ ConnMan::initialize(
     cmstate.stale_ms = netcfg.STALE_MS;
     cmstate.remove_ms = netcfg.REMOVE_MS;
     cmstate.acktimeout_ms = netcfg.ACKTIMEOUT_MS;
+    cmstate.heartbeat_ms = netcfg.HEARTBEAT_MS;
 
     cmstate.done = 0;
     cmstate.cmmutex.create();
@@ -296,7 +297,7 @@ ConnMan::SendAckTo(
 }
 
 Connection*
-GetConnectionBase(
+ConnMan::GetConnectionBaseByPacket(
     ConnManState& cmstate,
     Packet& packet
 )
@@ -305,6 +306,21 @@ GetConnectionBase(
     uint32_t cid = 0;
     cid = GetConnectionId(packet);
     pConn = GetConnectionById(cmstate.connections, cid);
+    if (!pConn)
+    {
+        pConn = &cmstate.localconn;
+    }
+    return pConn;
+}
+
+Connection*
+ConnMan::GetConnectionBaseById(
+    ConnManState& cmstate,
+    uint32_t id
+)
+{
+    Connection* pConn = nullptr;
+    pConn = GetConnectionById(cmstate.connections, id);
     if (!pConn)
     {
         pConn = &cmstate.localconn;
@@ -367,7 +383,7 @@ ConnMan::updateServer(
         packet = cmstate.rxpackets.front();
         cmstate.rxpackets.pop();
 
-        pConn = GetConnectionBase(cmstate, packet);
+        pConn = GetConnectionBaseByPacket(cmstate, packet);
         cmstate.onevent(cmstate.oneventcontext,
                         ConnManState::OnEventType::MESSAGE,
                         pConn,
@@ -577,7 +593,7 @@ ConnMan::ConnManIOHandler(
                     // Rx'd an ACk. 
                     // Something is eagerly awaiting this i'm sure.
                     Connection* pConn;
-                    pConn = GetConnectionBase(cmstate, request->packet);
+                    pConn = GetConnectionBaseByPacket(cmstate, request->packet);
                     if (pConn)
                     {
                         if (pConn->state == Connection::State::WAITONACK)
@@ -614,7 +630,7 @@ ConnMan::ConnManIOHandler(
                 else if (IsCode(request->packet, MESG::HEADER::Codes::Ping))
                 {
                     Connection* pConn;
-                    pConn = GetConnectionBase(cmstate, request->packet);
+                    pConn = GetConnectionBaseByPacket(cmstate, request->packet);
                     if (pConn)
                     {
                         ConnMan::SendPing(cmstate, pConn->who, pConn->id, false); // Pong
@@ -623,21 +639,24 @@ ConnMan::ConnManIOHandler(
                 else if (IsCode(request->packet, MESG::HEADER::Codes::Pong))
                 {
                     Connection* pConn;
-                    pConn = GetConnectionBase(cmstate, request->packet);
+                    pConn = GetConnectionBaseByPacket(cmstate, request->packet);
                     if (pConn)
                     {
                         pConn->pingend = clock::now();
+                        pConn->checkintime = pConn->pingend;
                         duration d = pConn->pingend - pConn->pingstart;
 
+                        pConn->pingtimes.push_back(d);
                         if (pConn->pingtimes.size() > 15)
                             pConn->pingtimes.pop_front();
-                        pConn->pingtimes.push_back(d);
+
                         pConn->avgping = 0;
                         for (auto d : pConn->pingtimes)
                         {
                             pConn->avgping += d.count();
                         }
                         pConn->avgping /= pConn->pingtimes.size();
+                        std::cout << "AVGPING: " << pConn->avgping <<std::endl;
                     }
                 }
                 else
@@ -646,7 +665,7 @@ ConnMan::ConnManIOHandler(
                     // Rx'd something other than Identify, or Ack
                     //
                     Connection* pConn = nullptr;
-                    pConn = GetConnectionBase(cmstate, request->packet);
+                    pConn = GetConnectionBaseByPacket(cmstate, request->packet);
                     if (pConn)
                     {
                         pConn->checkintime = clock::now();

@@ -129,7 +129,7 @@ public:
     clock::time_point   pingend;
 
     std::list<duration> pingtimes;
-    uint64_t            avgping;
+    float               avgping;
 
     clock::time_point   acktime;
     std::queue<Packet>  txpacketsreliable; // Reliability is managed per-connection
@@ -267,6 +267,20 @@ public:
         void* state,
         Request* request,
         uint64_t id
+    );
+
+    static
+    Connection*
+    GetConnectionBaseByPacket(
+        ConnManState& cmstate,
+        Packet& packet
+    );
+
+    static
+    Connection*
+    GetConnectionBaseById(
+        ConnManState& cmstate,
+        uint32_t id
     );
 
     //static
