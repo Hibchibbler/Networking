@@ -1,0 +1,4 @@
+heartbeat_ms=100
+stale_ms=5000
+remove_ms=10000
+acktimeout_ms=10

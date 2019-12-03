@@ -5,6 +5,8 @@
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
 
 #include "Network.h"
+#include "SlabPool.h"
+#include "NetworkConfig.h"
 #include <queue>
 #include <list>
 #include <map>
@@ -42,6 +44,11 @@ struct ACK
     uint32_t ack;
 };
 
+struct PINGPONG
+{
+
+};
+
 
 struct MESG
 {
@@ -52,7 +59,9 @@ struct MESG
             Grant,
             Deny,
             General,
-            Ack
+            Ack,
+            Ping,
+            Pong
         };
 
         enum class Mode {
@@ -73,17 +82,21 @@ struct MESG
         DENY        deny;       // Server Rx
         GENERAL     general;    // Client Rx & Server Rx
         ACK         ack;
+        PINGPONG    pingpong;
     }payload;
+};
+
+static const char* CodeName[] = {
+    "Identify",
+    "Grant",
+    "Deny",
+    "General",
+    "Ack"
 };
 
 class Connection
 {
 public:
-
-    enum class ConnectionType {
-        LOCAL,
-        REMOTE
-    };
 
     enum class State {
         IDLE,
@@ -91,20 +104,19 @@ public:
         ACKRECEIVED,
         ACKNOTRECEIVED
     };
-    enum class AuthLevel {
-        UNAUTH,
-        AUTH
-    };
 
-    AuthLevel           level;
     std::string         playername;
     State               state;
     uint32_t            id;
     Address             who;
-    ConnectionType      conntype;
 
-    uint32_t            curseq;
-    uint32_t            curack;
+    uint32_t            curseq; // Reliable
+    uint32_t            curack; // Reliable
+    uint32_t            highseq;
+
+    uint32_t            curuseq; // Unreliable
+    uint32_t            curuack; // Unreliable
+    uint32_t            highuseq;
 
     clock::time_point   checkintime;
     clock::time_point   starttime;
@@ -131,7 +143,6 @@ struct ConnManState
     };
     typedef void(*OnEvent)(void* oecontext, OnEventType t, Connection* conn, Packet* packet);
 
-    uint64_t                CurrentConnectionId;
     uint64_t                timeticks;
     uint32_t                done;
 
@@ -141,18 +152,26 @@ struct ConnManState
     std::string             gamename;
     std::string             gamepass;
 
+    uint32_t                heartbeat_ms;
+    uint32_t                stale_ms;
+    uint32_t                remove_ms;
+    uint32_t                acktimeout_ms;
+
     NetworkState            netstate;
     Mutex                   cmmutex;
-    //Thread                  threadSender;
-    std::list<Connection>   connections;
 
+    std::list<Connection>   connections;
     Connection              localconn;
 
     std::queue<Packet>      rxpackets;
     std::queue<Packet>      txpacketsunreliable;
 
+    SlabPool<uint32_t>      slabpool;
+
     OnEvent                 onevent;
     void*                   oneventcontext;
+
+
 };
 
 /*
@@ -172,6 +191,7 @@ public:
     void
     initialize(
         ConnManState & cmstate,
+        NetworkConfig & netcfg,
         uint32_t port,
         uint32_t numplayers,
         std::string gamename,
