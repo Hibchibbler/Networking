@@ -219,6 +219,7 @@ public:
     void
     SendReliable(
         ConnManState & cmstate,
+        Address to,
         uint32_t id,
         uint8_t* buffer,
         uint32_t buffersize,
@@ -229,6 +230,7 @@ public:
     void
     SendUnreliable(
         ConnManState & cmstate,
+        Address to,
         uint32_t id,
         uint8_t* buffer,
         uint32_t buffersize

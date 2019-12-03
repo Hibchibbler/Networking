@@ -63,6 +63,7 @@ ConnMan::cleanup(
 void
 ConnMan::SendReliable(
     ConnManState & cmstate,
+    Address to,
     uint32_t id,
     uint8_t* buffer,
     uint32_t buffersize,
@@ -75,7 +76,7 @@ ConnMan::SendReliable(
     {
         memset(packet.buffer, 0, MAX_PACKET_SIZE);
         packet.buffersize = sizeof(MESG::HEADER) + sizeof(GENERAL);
-        packet.address = pConn->who;
+        packet.address = to;
 
         MESG* pMsg = (MESG*)packet.buffer;
         AddMagic(pMsg);
@@ -94,6 +95,7 @@ ConnMan::SendReliable(
 void
 ConnMan::SendUnreliable(
     ConnManState & cmstate,
+    Address to,
     uint32_t id,
     uint8_t* buffer,
     uint32_t buffersize
@@ -105,7 +107,7 @@ ConnMan::SendUnreliable(
     {
         memset(packet.buffer, 0, MAX_PACKET_SIZE);
         packet.buffersize = sizeof(MESG::HEADER) + sizeof(GENERAL);
-        packet.address = pConn->who;
+        packet.address = to;
 
         MESG* pMsg = (MESG*)packet.buffer;
         AddMagic(pMsg);
