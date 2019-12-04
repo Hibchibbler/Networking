@@ -33,7 +33,7 @@
 namespace bali
 {
 const ULONG MAX_PACKET_SIZE = 1280;
-const ULONG MAX_OVERLAPS = 16;
+const ULONG MAX_OVERLAPS = 32;
 
 class Mutex
 {

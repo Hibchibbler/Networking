@@ -4,6 +4,7 @@
 #include <sstream>
 #include <map>
 #include <algorithm>
+#include <iostream>
 
 namespace bali
 {
@@ -39,6 +40,10 @@ LoadConfig(
                 }
             }
         }
+    }
+    else
+    {
+        std::cout << "Error: unable to open: " << fn << std::endl;
     }
 
     return configValues;

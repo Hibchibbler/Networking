@@ -159,9 +159,12 @@ struct ConnManState
     uint64_t                timeticks;
     uint32_t                done;
 
+    std::string             ipv4server;
     uint32_t                port;
+
     uint32_t                numplayers;
     uint32_t                numreadyplayers;
+
     std::string             gamename;
     std::string             gamepass;
 
@@ -179,7 +182,12 @@ struct ConnManState
     std::queue<Packet>      rxpackets;
     std::queue<Packet>      txpacketsunreliable;
 
-    SlabPool<uint32_t>      slabpool;
+    struct RequestState
+    {
+        uint32_t id;
+        uint32_t state;
+    };
+    SlabPool<RequestState>  slabpool;
 
     OnEvent                 onevent;
     void*                   oneventcontext;
@@ -218,6 +226,8 @@ public:
     initializeClient(
         ConnManState & cmstate,
         NetworkConfig & netcfg,
+        std::string ipv4,
+        uint32_t port,
         std::string gamename,
         std::string gamepass,
         ConnManState::OnEvent onevent,
@@ -247,11 +257,17 @@ public:
     typedef void (*AcknowledgeHandler)(uint32_t code);
 
     static
-    void
+    uint32_t
+    Query(
+        uint32_t who,
+        uint32_t what
+    ){}
+
+    static
+    uint32_t
     SendReliable(
         ConnManState & cmstate,
-        Address to,
-        uint32_t id,
+        Connection & connection,
         uint8_t* buffer,
         uint32_t buffersize,
         AcknowledgeHandler ackhandler
@@ -261,8 +277,7 @@ public:
     void
     SendUnreliable(
         ConnManState & cmstate,
-        Address to,
-        uint32_t id,
+        Connection & connection,
         uint8_t* buffer,
         uint32_t buffersize
     );
@@ -280,8 +295,7 @@ public:
     void
     SendPing(
         ConnManState & cmstate,
-        Address to,
-        uint32_t id,
+        Connection & connection,
         bool ping
     );
 
@@ -303,16 +317,23 @@ public:
 
     static
     Connection*
-    GetConnectionBaseByPacket(
-        ConnManState& cmstate,
-        Packet& packet
+    GetConnectionById(
+        std::list<Connection> & connections,
+        uint32_t id
     );
 
     static
-    Connection*
-    GetConnectionBaseById(
-        ConnManState& cmstate,
-        uint32_t id
+    bool
+    RemoveConnectionByName(
+        std::list<Connection> & connections,
+        std::string playername
+    );
+
+    static
+    bool
+    IsPlayerNameAvailable(
+        std::list<Connection> & connections,
+        std::string name
     );
 
     static
@@ -349,12 +370,6 @@ public:
     );
 };
 
-bool
-RemoveConnectionByName(
-    std::list<Connection> & connections,
-    std::string playername
-);
-
 void
 AddMagic(
     MESG* pMsg
@@ -381,18 +396,6 @@ IsSizeValid(
     Packet & packet
 );
 
-Connection*
-GetConnectionById(
-    std::list<Connection> & connections,
-    uint32_t id
-);
-
-Connection*
-GetConnectionByName(
-    std::list<Connection> & connections,
-    std::string playername
-);
-
 std::string
 GetPlayerName(
     Packet & packet
@@ -413,17 +416,6 @@ GetGamePass(
     Packet & packet
 );
 
-bool
-IsExpectsAck(
-    Packet & packet
-);
-
-bool
-IsPlayerNameAvailable(
-    ConnManState & cmstate,
-    std::string name
-);
-
 void
 PrintMsgHeader(
     Packet & packet,
@@ -436,16 +428,10 @@ PrintfMsg(
     ...
 );
 
-
 Address
 CreateAddress(
     uint32_t port,
     const char* szIpv4
-);
-
-MESG*
-GetMesg(
-    Packet & packet
 );
 
 }

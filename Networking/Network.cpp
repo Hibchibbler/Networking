@@ -197,8 +197,9 @@ Network::Result Network::InitializeWriteRequest(Request* req, Packet* packet)
     Network::Result result(Network::ResultType::SUCCESS);
     req->ioType = Request::IOType::WRITE;
     // Copy Address
-    memcpy(&req->packet.address.addr, &packet->address.addr, sizeof(SOCKADDR_STORAGE));
-    req->packet.address.len = packet->address.len;
+    //memcpy(&req->packet.address.addr, &packet->address.addr, sizeof(SOCKADDR_STORAGE));
+    //req->packet.address.len = packet->address.len;
+    req->packet.address = packet->address;
 
     assert(packet->buffersize <= MAX_PACKET_SIZE);
 
