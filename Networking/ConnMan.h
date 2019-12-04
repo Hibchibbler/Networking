@@ -101,6 +101,7 @@ class Connection
 public:
 
     enum class State {
+        UNINIT,
         IDLE,
         WAITONACK,
         ACKRECEIVED,
@@ -135,6 +136,11 @@ public:
     std::queue<Packet>  txpacketsreliable; // Reliability is managed per-connection
     Packet              txpacketpending; //we only send 1 reliable message at a time, so,,
 };
+
+void
+InitializeConnection(
+    Connection* pConn
+);
 
 struct ConnManState
 {
@@ -196,7 +202,7 @@ public:
 
     static
     void
-    initialize(
+    initializeServer(
         ConnManState & cmstate,
         NetworkConfig & netcfg,
         uint32_t port,
@@ -209,7 +215,25 @@ public:
 
     static
     void
+    initializeClient(
+        ConnManState & cmstate,
+        NetworkConfig & netcfg,
+        std::string gamename,
+        std::string gamepass,
+        ConnManState::OnEvent onevent,
+        void* oneventcontext
+    );
+
+    static
+    void
     updateServer(
+        ConnManState & cmstate,
+        uint32_t ms_elapsed
+    );
+
+    static
+    void
+    updateClient(
         ConnManState & cmstate,
         uint32_t ms_elapsed
     );
@@ -263,7 +287,15 @@ public:
 
     static
     void
-    ConnManIOHandler(
+    ConnManServerIOHandler(
+        void* state,
+        Request* request,
+        uint64_t id
+    );
+
+    static
+    void
+    ConnManClientIOHandler(
         void* state,
         Request* request,
         uint64_t id
@@ -282,13 +314,6 @@ public:
         ConnManState& cmstate,
         uint32_t id
     );
-
-    //static
-    //void ConnManSenderHandler(
-    //    void* state,
-    //    Request* request,
-    //    uint64_t id
-    //);
 
     static
     uint64_t
@@ -338,16 +363,6 @@ AddMagic(
 uint32_t
 SizeofPayload(
     MESG::HEADER::Codes code
-);
-
-uint64_t
-InitializePacket(
-    Packet & packet,
-    void* ackhandler,
-    Address & who,
-    MESG::HEADER::Codes code,
-    uint32_t id,
-    uint32_t seq
 );
 
 bool

@@ -5,7 +5,7 @@
 namespace bali
 {
 void
-ConnMan::initialize(
+ConnMan::initializeServer(
     ConnManState & cmstate,
     NetworkConfig & netcfg,
     uint32_t port,
@@ -34,7 +34,59 @@ ConnMan::initialize(
     cmstate.onevent = onevent;
     cmstate.oneventcontext = oneventcontext;
 
-    Network::initialize(cmstate.netstate, 8, port, ConnMan::ConnManIOHandler, &cmstate);
+    Network::initialize(cmstate.netstate, 8, port, ConnMan::ConnManServerIOHandler, &cmstate);
+    Network::start(cmstate.netstate);
+}
+void
+InitializeConnection(
+    Connection* pConn
+)
+{
+    // But we don't know it's ID yet
+    // because we have not yet been GRANTed
+    pConn->id = 0;
+    pConn->state = Connection::State::UNINIT;
+    pConn->curseq = 0;
+    pConn->curack = 0;
+    pConn->highseq = 0;
+    pConn->curuseq = 0;
+    pConn->curuack = 0;
+    pConn->highuseq = 0;
+    pConn->checkintime = clock::now();
+    pConn->heartbeat = clock::now();
+}
+
+void
+ConnMan::initializeClient(
+    ConnManState & cmstate,
+    NetworkConfig & netcfg,
+    std::string gamename,
+    std::string gamepass,
+    ConnManState::OnEvent onevent,
+    void* oneventcontext
+)
+{
+    srand(1523791);
+
+    cmstate.port = 0;
+    cmstate.numplayers = 0;
+    cmstate.gamename = gamename;
+    cmstate.gamepass = gamepass;
+
+    cmstate.stale_ms = netcfg.STALE_MS;
+    cmstate.remove_ms = netcfg.REMOVE_MS;
+    cmstate.acktimeout_ms = netcfg.ACKTIMEOUT_MS;
+    cmstate.heartbeat_ms = netcfg.HEARTBEAT_MS;
+
+    cmstate.done = 0;
+    cmstate.cmmutex.create();
+
+    cmstate.onevent = onevent;
+    cmstate.oneventcontext = oneventcontext;
+
+    InitializeConnection(&cmstate.localconn);
+
+    Network::initialize(cmstate.netstate, 8, 0, ConnMan::ConnManClientIOHandler, &cmstate);
     Network::start(cmstate.netstate);
 }
 
@@ -178,18 +230,12 @@ ConnMan::sendIdentifyTo(
     // Let's put a new connection into the list
     //
     Connection connection;
-    connection.playername = playername;
 
     // But we don't know it's ID yet
     // because we have not yet been GRANTed
-    connection.id = 0;
+    InitializeConnection(&connection);
+    connection.playername = playername;
     connection.state = Connection::State::IDLE;
-    connection.curseq = 0;
-    connection.curack = 0;
-    connection.highseq = 0;
-    connection.curuseq = 0;
-    connection.curuack = 0;
-    connection.highuseq = 0;
 
     cmstate.localconn = connection;
 
@@ -329,6 +375,290 @@ ConnMan::GetConnectionBaseById(
 }
 
 void
+ConnMan::updateClient(
+    ConnManState & cmstate,
+    uint32_t ms_elapsed
+)
+{
+
+    cmstate.timeticks += ms_elapsed;
+    cmstate.cmmutex.lock();
+    //
+    // Service outgoing unreliable packets
+    //
+    while (!cmstate.txpacketsunreliable.empty())
+    {
+        MESG* m = (MESG*)cmstate.txpacketsunreliable.front().buffer;
+
+        std::cout << "Popped Unreliable: " << CodeName[m->header.code] << std::endl;
+        Network::write(cmstate.netstate, cmstate.txpacketsunreliable.front());
+        cmstate.txpacketsunreliable.pop();
+    }
+
+    // Service outgoing reliable packets.
+    //
+    // We are only going to send a packet
+    // if we are not currently waiting for an ack
+    // from last packet.
+
+    auto & c = cmstate.localconn;
+    if (c.state == Connection::State::IDLE)
+    {
+        if (!c.txpacketsreliable.empty())
+        {
+            c.txpacketpending = c.txpacketsreliable.front();
+            MESG* m = (MESG*)c.txpacketpending.buffer;
+            c.state = Connection::State::WAITONACK;
+            c.acktime = clock::now();
+
+            std::cout << "Popped Reliable: " << CodeName[m->header.code] << std::endl;
+            Network::write(cmstate.netstate, c.txpacketpending);
+            c.txpacketsreliable.pop();
+        }
+    }
+
+
+    //
+    // Service incoming packets
+    //
+    while (!cmstate.rxpackets.empty())
+    {
+        Connection* pConn = nullptr;
+        Packet packet;
+
+        packet = cmstate.rxpackets.front();
+        cmstate.rxpackets.pop();
+
+        pConn = &cmstate.localconn;
+        cmstate.onevent(cmstate.oneventcontext,
+                        ConnManState::OnEventType::MESSAGE,
+                        pConn,
+                        &packet);
+    }
+
+    //
+    // Update the connection states, and raise interesting facts.
+    //
+    auto* pConn = &cmstate.localconn;
+    //
+    // Time out those waiting for an ACK
+    //
+    if (pConn->state == Connection::State::WAITONACK)
+    {
+        duration dur = clock::now() - pConn->acktime;
+        if (dur.count() > cmstate.acktimeout_ms)
+        {
+            cmstate.onevent(cmstate.oneventcontext,
+                            ConnManState::OnEventType::ACK_TIMEOUT,
+                            &(*pConn),
+                            &pConn->txpacketpending);
+        }
+    }
+
+    //
+    // Connection hasn't seen traffic in over 10 seconds
+    // Notify user, and drop Connection
+    //
+    duration hb = clock::now() - pConn->heartbeat;
+    if (hb.count() > cmstate.heartbeat_ms)
+    {
+        pConn->heartbeat = clock::now();
+        ConnMan::SendPing(cmstate, pConn->who, pConn->id, true);
+    }
+
+    duration d = clock::now() - pConn->checkintime;
+    if (d.count() > cmstate.stale_ms)
+    {
+        cmstate.onevent(cmstate.oneventcontext,
+                        ConnManState::OnEventType::CONNECTION_STALE,
+                        &(*pConn),
+                        nullptr);
+    }
+
+    cmstate.cmmutex.unlock();
+}
+
+void
+ConnMan::ConnManClientIOHandler(
+    void* cmstate_,
+    Request* request,
+    uint64_t tid
+)
+{
+    bali::Network::Result result(bali::Network::ResultType::SUCCESS);
+    ConnManState& cmstate = *((ConnManState*)cmstate_);
+    std::random_device rd;     // only used once to initialise (seed) engine
+    std::mt19937 rng(rd());    // random-number engine used (Mersenne-Twister in this case)
+    std::uniform_int_distribution<uint32_t> uni(1, 65536); // guaranteed unbiased
+
+    auto random_integer = uni(rng);
+    cmstate.cmmutex.lock();
+    if (request->ioType == Request::IOType::READ)
+    {
+        MESG* m = (MESG*)request->packet.buffer;
+        std::cout << "Client Rx: " << CodeName[m->header.code] << std::endl;
+
+
+        if (IsMagicGood(request->packet))
+        {
+            if (IsSizeValid(request->packet))
+            {
+                cmstate.localconn.checkintime = clock::now();
+                if (IsCode(request->packet, MESG::HEADER::Codes::Grant))
+                {
+                    //
+                    // If we're receiving a Grant,
+                    // then the associated connection has not yet been assigned an Id.
+                    // Therefore, we find the associated connection
+                    // by name
+                    //
+                    std::string playername = GetPlayerName(request->packet);
+                    if (playername == cmstate.localconn.playername)
+                    {
+                        cmstate.localconn.id = GetConnectionId(request->packet);
+                        cmstate.localconn.state = Connection::State::IDLE;
+                        cmstate.onevent(cmstate.oneventcontext, ConnManState::OnEventType::GRANTED, &cmstate.localconn, &request->packet);
+                    }
+                    else
+                    {
+                        std::cout << "Weird: Client Rx Grant contains unknown Player Name\n";
+                    }
+                }
+                else if (IsCode(request->packet, MESG::HEADER::Codes::Deny))
+                {
+                    std::string playername = GetPlayerName(request->packet);
+                    if (playername == cmstate.localconn.playername)
+                    {
+                        cmstate.onevent(cmstate.oneventcontext, ConnManState::OnEventType::DENIED, &cmstate.localconn, &request->packet);
+                    }
+                    else
+                    {
+                        std::cout << "Weird: Client Rx Deny contains unknown Player Name\n";
+                    }
+                }
+                else if (IsCode(request->packet, MESG::HEADER::Codes::Ack))
+                {
+                    // Rx'd an ACk. 
+                    // Something is eagerly awaiting this i'm sure.
+                    Connection* pConn;
+                    pConn = &cmstate.localconn;
+                    if (pConn)
+                    {
+                        if (pConn->state == Connection::State::WAITONACK)
+                        {
+                            MESG* pMsg = (MESG*)request->packet.buffer;
+
+                            uint32_t ack = pMsg->payload.ack.ack;
+                            uint32_t hope = ((MESG*)pConn->txpacketpending.buffer)->header.seq;
+
+                            if (ack == hope)
+                            {
+                                pConn->state = Connection::State::ACKRECEIVED;
+                                //std::cout << "Rx Ack: " << ack << std::endl;
+                                cmstate.onevent(cmstate.oneventcontext,
+                                                ConnManState::OnEventType::ACK_RECEIVED,
+                                                pConn,
+                                                &pConn->txpacketpending);
+                            }
+                            else
+                            {
+                                std::cout << "Weird: received an Ack for wrong sequence. " << ack << ",  " << hope << std::endl;
+                            }
+                        }
+                        else
+                        {
+                            std::cout << "Weird: received an Ack but wasn't expecting it." << std::endl;
+                        }
+                    }
+                    else
+                    {
+                        std::cout << "Problem: Rx'd ACK Packet contains unknown ID!\n";
+                    }
+                }
+                else if (IsCode(request->packet, MESG::HEADER::Codes::Ping))
+                {
+                    Connection* pConn;
+                    pConn = pConn = &cmstate.localconn; //GetConnectionBaseByPacket(cmstate, request->packet);
+                    if (pConn)
+                    {
+                        ConnMan::SendPing(cmstate, pConn->who, pConn->id, false); // Pong
+                    }
+                }
+                else if (IsCode(request->packet, MESG::HEADER::Codes::Pong))
+                {
+                    Connection* pConn;
+                    pConn = pConn = &cmstate.localconn; //GetConnectionBaseByPacket(cmstate, request->packet);
+                    if (pConn)
+                    {
+                        pConn->pingend = clock::now();
+                        duration d = pConn->pingend - pConn->pingstart;
+
+                        pConn->pingtimes.push_back(d);
+                        if (pConn->pingtimes.size() > 15)
+                            pConn->pingtimes.pop_front();
+
+                        pConn->avgping = 0;
+                        for (auto d : pConn->pingtimes)
+                        {
+                            pConn->avgping += d.count();
+                        }
+                        pConn->avgping /= pConn->pingtimes.size();
+                        std::cout << "AVGPING: " << pConn->avgping << std::endl;
+                    }
+                }
+                else
+                {
+                    //
+                    // Rx'd something other than Identify, or Ack
+                    //
+                    Connection* pConn = nullptr;
+                    pConn = pConn = &cmstate.localconn; //GetConnectionBaseByPacket(cmstate, request->packet);
+                    if (pConn)
+                    {
+                        /*
+                            On Packet Receive, If packet is reliable, Then send Ack packet unreliably.
+                        */
+                        MESG* msg = (MESG*)request->packet.buffer;
+                        if (msg->header.mode == (uint8_t)MESG::HEADER::Mode::Reliable)
+                        {
+                            //if (msg->header.seq != 40)
+                            //{
+                                SendAckTo(cmstate, pConn->who, pConn->id, msg->header.seq);
+                            //}
+                            //else
+                            //{
+                            //    std::cout << "Debug: Not Tx Ack: " << msg->header.seq << std::endl;
+                            //}
+                        }
+                        cmstate.rxpackets.push(request->packet);
+                    }
+                    else
+                    {
+                    }
+                }
+            }
+            else
+            {
+                // Size does not meet expectations, given "request->header.code"
+                std::cout << "Client Rx Packet with incoherent Code or Size." << std::endl;
+            }
+        }
+        else
+        {
+            // Magic MisMatch
+            std::cout << "Client Rx Packet with incoherent Magic." << std::endl;
+        }
+        Network::read(cmstate.netstate);
+    }
+    else if (request->ioType == Request::IOType::WRITE)
+    {
+        MESG* m = (MESG*)request->packet.buffer;
+        std::cout << "Client Tx: " << CodeName[m->header.code] << std::endl;
+    }
+    cmstate.cmmutex.unlock();
+}
+
+void
 ConnMan::updateServer(
     ConnManState & cmstate,
     uint32_t ms_elapsed
@@ -378,23 +708,26 @@ ConnMan::updateServer(
     while (!cmstate.rxpackets.empty())
     {
         Connection* pConn = nullptr;
+        uint32_t cid;
         Packet packet;
 
         packet = cmstate.rxpackets.front();
         cmstate.rxpackets.pop();
 
-        pConn = GetConnectionBaseByPacket(cmstate, packet);
-        cmstate.onevent(cmstate.oneventcontext,
-                        ConnManState::OnEventType::MESSAGE,
-                        pConn,
-                        &packet);
-        
+        cid = GetConnectionId(packet);
+        pConn = GetConnectionById(cmstate.connections, cid);
+        if (!pConn)
+        {
+            cmstate.onevent(cmstate.oneventcontext,
+                            ConnManState::OnEventType::MESSAGE,
+                            pConn,
+                            &packet);
+        }
     }
 
     //
     // Update the connection states, and raise interesting facts.
     //
-    //for (auto c = cmstate.connections.begin(); c != cmstate.connections.end(); c++)
     auto conniter = cmstate.connections.begin();
     while (conniter != cmstate.connections.end())
     {
@@ -407,9 +740,9 @@ ConnMan::updateServer(
             if (dur.count() > cmstate.acktimeout_ms)
             {
                 cmstate.onevent(cmstate.oneventcontext,
-                    ConnManState::OnEventType::ACK_TIMEOUT,
-                    &(*conniter),
-                    &conniter->txpacketpending);
+                                ConnManState::OnEventType::ACK_TIMEOUT,
+                                &(*conniter),
+                                &conniter->txpacketpending);
             }
         }
 
@@ -449,7 +782,7 @@ ConnMan::updateServer(
 }
 
 void
-ConnMan::ConnManIOHandler(
+ConnMan::ConnManServerIOHandler(
     void* cmstate_,
     Request* request,
     uint64_t tid
@@ -462,11 +795,12 @@ ConnMan::ConnManIOHandler(
     std::uniform_int_distribution<uint32_t> uni(1, 65536); // guaranteed unbiased
 
     auto random_integer = uni(rng);
-
+    cmstate.cmmutex.lock();
     if (request->ioType == Request::IOType::READ)
     {
-        // Debug Print buffer
-        //PrintMsgHeader(request->packet, true);
+        MESG* m = (MESG*)request->packet.buffer;
+        std::cout << "Server Rx: " << CodeName[m->header.code] << std::endl;
+
         /*
             If we recieve an Identify packet,
             and we are accepting more players,
@@ -477,10 +811,6 @@ ConnMan::ConnManIOHandler(
             and that are from an identified client,
             will be enqueued to the packet queue.
         */
-        MESG* m = (MESG*)request->packet.buffer;
-        std::cout << "Rx: " << CodeName[m->header.code] << std::endl;
-
-        cmstate.cmmutex.lock();
         if (IsMagicGood(request->packet))
         {
             if (IsSizeValid(request->packet))
@@ -507,25 +837,22 @@ ConnMan::ConnManIOHandler(
                                     //
                                     //std::cout << "Rx Identify: " << pn << std::endl;
                                     Connection connection;
+                                    InitializeConnection(&connection);
                                     connection.playername = pn;
                                     connection.id = random_integer;
                                     connection.who = request->packet.address;
                                     connection.state = Connection::State::IDLE;
-                                    connection.checkintime = clock::now();
-                                    connection.heartbeat = clock::now();
-                                    connection.curseq = 0;
-                                    connection.curack = 0;
-                                    connection.highseq = 0;
-                                    connection.curuseq = 0;
-                                    connection.curuack = 0;
-                                    connection.highuseq = 0;
+
                                     cmstate.connections.push_back(connection);
                                     cmstate.onevent(cmstate.oneventcontext,
                                                     ConnManState::OnEventType::CONNECTION_ADD,
                                                     &connection,
                                                     &request->packet);
 
-                                    ConnMan::sendGrantTo(cmstate, connection.who, connection.id, connection.playername);
+                                    ConnMan::sendGrantTo(cmstate,
+                                                         connection.who,
+                                                         connection.id,
+                                                         connection.playername);
                                 }
                                 else
                                 {
@@ -555,47 +882,17 @@ ConnMan::ConnManIOHandler(
                         }
                     }
                 }
-                else if (IsCode(request->packet, MESG::HEADER::Codes::Grant))
-                {
-                    //
-                    // If we're receiving a Grant,
-                    // then the associated connection has not yet been assigned an Id.
-                    // Therefore, we find the associated connection
-                    // by name
-                    //
-                    std::string playername = GetPlayerName(request->packet);
-                    if (playername == cmstate.localconn.playername)
-                    {
-                        cmstate.localconn.checkintime = clock::now();
-                        cmstate.localconn.id = GetConnectionId(request->packet);
-                        cmstate.onevent(cmstate.oneventcontext, ConnManState::OnEventType::GRANTED, &cmstate.localconn, &request->packet);
-                    }
-                    else
-                    {
-                        std::cout << "Weird: Client Rx Grant contains unknown Player Name\n";
-                    }
-                }
-                else if (IsCode(request->packet, MESG::HEADER::Codes::Deny))
-                {
-                    std::string playername = GetPlayerName(request->packet);
-                    if (playername == cmstate.localconn.playername)
-                    {
-                        cmstate.localconn.checkintime = clock::now();
-                        cmstate.onevent(cmstate.oneventcontext, ConnManState::OnEventType::DENIED, &cmstate.localconn, &request->packet);
-                    }
-                    else
-                    {
-                        std::cout << "Weird: Client Rx Deny contains unknown Player Name\n";
-                    }
-                }
                 else if (IsCode(request->packet, MESG::HEADER::Codes::Ack))
                 {
                     // Rx'd an ACk. 
                     // Something is eagerly awaiting this i'm sure.
                     Connection* pConn;
-                    pConn = GetConnectionBaseByPacket(cmstate, request->packet);
+                    uint32_t cid;
+                    cid = GetConnectionId(request->packet);
+                    pConn = GetConnectionById(cmstate.connections, cid);
                     if (pConn)
                     {
+                        pConn->checkintime = clock::now();
                         if (pConn->state == Connection::State::WAITONACK)
                         {
                             MESG* pMsg = (MESG*)request->packet.buffer;
@@ -630,20 +927,25 @@ ConnMan::ConnManIOHandler(
                 else if (IsCode(request->packet, MESG::HEADER::Codes::Ping))
                 {
                     Connection* pConn;
-                    pConn = GetConnectionBaseByPacket(cmstate, request->packet);
+                    uint32_t cid;
+                    cid = GetConnectionId(request->packet);
+                    pConn = GetConnectionById(cmstate.connections, cid);
                     if (pConn)
                     {
+                        pConn->checkintime = clock::now();
                         ConnMan::SendPing(cmstate, pConn->who, pConn->id, false); // Pong
                     }
                 }
                 else if (IsCode(request->packet, MESG::HEADER::Codes::Pong))
                 {
                     Connection* pConn;
-                    pConn = GetConnectionBaseByPacket(cmstate, request->packet);
+                    uint32_t cid;
+                    cid = GetConnectionId(request->packet);
+                    pConn = GetConnectionById(cmstate.connections, cid);
                     if (pConn)
                     {
+                        pConn->checkintime = clock::now();
                         pConn->pingend = clock::now();
-                        pConn->checkintime = pConn->pingend;
                         duration d = pConn->pingend - pConn->pingstart;
 
                         pConn->pingtimes.push_back(d);
@@ -664,8 +966,10 @@ ConnMan::ConnManIOHandler(
                     //
                     // Rx'd something other than Identify, or Ack
                     //
-                    Connection* pConn = nullptr;
-                    pConn = GetConnectionBaseByPacket(cmstate, request->packet);
+                    Connection* pConn;
+                    uint32_t cid;
+                    cid = GetConnectionId(request->packet);
+                    pConn = GetConnectionById(cmstate.connections, cid);
                     if (pConn)
                     {
                         pConn->checkintime = clock::now();
@@ -694,15 +998,14 @@ ConnMan::ConnManIOHandler(
             else
             {
                 // Size does not meet expectations, given "request->header.code"
-                std::cout << "Rx Packet with incoherent Code or Size." << std::endl;
+                std::cout << "Server Rx Packet with incoherent Code or Size." << std::endl;
             }
         }
         else
         {
             // Magic MisMatch
-            std::cout << "Rx Packet with incoherent Magic." << std::endl;
+            std::cout << "Server Rx Packet with incoherent Magic." << std::endl;
         }
-        cmstate.cmmutex.unlock();
 
         // Prepare read to perpetuate.
         // TODO: what happens when no more free requests?
@@ -711,8 +1014,11 @@ ConnMan::ConnManIOHandler(
     else if (request->ioType == Request::IOType::WRITE)
     {
         MESG* m = (MESG*)request->packet.buffer;
-        std::cout << "Tx: " << CodeName[m->header.code] << std::endl;
+        std::cout << "Server Tx: " << CodeName[m->header.code] << std::endl;
     }
+
+    cmstate.cmmutex.unlock();
+
     return;
 }
 
@@ -736,31 +1042,10 @@ SizeofPayload(
     if (code == MESG::HEADER::Codes::Deny) { payloadSize += sizeof(DENY); }
     if (code == MESG::HEADER::Codes::General) { payloadSize += sizeof(GENERAL); }
     if (code == MESG::HEADER::Codes::Ack) { payloadSize += sizeof(ACK); }
+    if (code == MESG::HEADER::Codes::Ping ||
+        code == MESG::HEADER::Codes::Pong) { payloadSize += sizeof(PINGPONG); }
 
     return payloadSize;
-}
-
-uint64_t
-InitializePacket(
-    Packet & packet,
-    void* ackhandler,
-    Address & who,
-    MESG::HEADER::Codes code,
-    uint32_t id,
-    uint32_t seq
-)
-{
-    //MESG* pMsg = (MESG*)packet.buffer;
-    //packet.ackhandler = ackhandler;
-    //packet.buffersize = sizeof(MESG::HEADER) + SizeofPayload(code);
-    //packet.address = who;
-
-    //memcpy(pMsg->header.magic, "AB", 2);
-    //pMsg->header.code = (uint32_t)code;
-    //pMsg->header.id = id;
-    //pMsg->header.seq = seq;
-
-    return 0;
 }
 
 
@@ -835,19 +1120,6 @@ GetConnectionId(
     return RxMsg->header.id;
 }
 
-bool
-IsExpectsAck(
-    Packet & packet
-)
-{
-    bool expectation = false;
-    MESG* RxMsg = (MESG*)packet.buffer;
-    //if (RxMsg->header.traits & (1ul << (uint32_t)MESG::HEADER::Traits::ACK))
-    {
-        expectation = true;
-    }
-    return expectation;
-}
 
 bool
 IsPlayerNameAvailable(
