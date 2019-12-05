@@ -100,6 +100,21 @@ class Connection
 {
 public:
 
+    struct RequestStatus
+    {
+        enum class State {
+            NEW,
+            PENDING,
+            FAILED,
+            SUCCEEDED
+        };
+        clock::time_point startack;
+        clock::time_point endack;
+        uint32_t seq;
+        State    state;
+        Packet   packet;
+    };
+
     enum class State {
         UNINIT,
         IDLE,
@@ -135,7 +150,32 @@ public:
     clock::time_point   acktime;
     std::queue<Packet>  txpacketsreliable; // Reliability is managed per-connection
     Packet              txpacketpending; //we only send 1 reliable message at a time, so,,
+
+    Mutex               reqstatusmutex;
+    std::map<uint32_t, RequestStatus> reqstatus;
+
 };
+
+void
+SetRequestStatusState(
+    Connection & connection,
+    uint32_t sid,
+    Connection::RequestStatus::State state,
+    bool lock
+);
+
+void
+AddRequestStatus(
+    Connection & connection,
+    Connection::RequestStatus & rs,
+    uint32_t sid
+);
+
+void
+RemoveRequestStatus(
+    Connection & connection,
+    uint32_t sid
+);
 
 void
 InitializeConnection(
@@ -210,7 +250,7 @@ public:
 
     static
     void
-    initializeServer(
+    InitializeServer(
         ConnManState & cmstate,
         NetworkConfig & netcfg,
         uint32_t port,
@@ -223,7 +263,7 @@ public:
 
     static
     void
-    initializeClient(
+    InitializeClient(
         ConnManState & cmstate,
         NetworkConfig & netcfg,
         std::string ipv4,
@@ -236,21 +276,21 @@ public:
 
     static
     void
-    updateServer(
+    UpdateServer(
         ConnManState & cmstate,
         uint32_t ms_elapsed
     );
 
     static
     void
-    updateClient(
+    UpdateClient(
         ConnManState & cmstate,
         uint32_t ms_elapsed
     );
 
     static
     void
-    cleanup(
+    Cleanup(
         ConnManState & cmstate
     );
 
@@ -259,9 +299,10 @@ public:
     static
     uint32_t
     Query(
-        uint32_t who,
-        uint32_t what
-    ){}
+        Connection& who,
+        uint32_t what,
+        uint32_t why
+    );
 
     static
     uint32_t
@@ -338,13 +379,13 @@ public:
 
     static
     uint64_t
-    readyCount(
+    ReadyCount(
         ConnManState & cmstate
     );
 
     static
     uint64_t
-    sendIdentifyTo(
+    SendIdentifyTo(
         ConnManState & cmstate,
         Address to,
         std::string playername,
@@ -354,7 +395,7 @@ public:
 
     static
     uint64_t
-    sendGrantTo(
+    SendGrantTo(
         ConnManState & cmstate,
         Address to,
         uint32_t id,
@@ -363,7 +404,7 @@ public:
 
     static
     uint64_t
-    sendDenyTo(
+    SendDenyTo(
         ConnManState & cmstate,
         Address to,
         std::string playername
@@ -413,6 +454,11 @@ GetGameName(
 
 std::string
 GetGamePass(
+    Packet & packet
+);
+
+uint32_t
+GetPacketSequence(
     Packet & packet
 );
 

@@ -5,7 +5,7 @@
 namespace bali
 {
 void
-ConnMan::initializeServer(
+ConnMan::InitializeServer(
     ConnManState & cmstate,
     NetworkConfig & netcfg,
     uint32_t port,
@@ -57,7 +57,7 @@ InitializeConnection(
 }
 
 void
-ConnMan::initializeClient(
+ConnMan::InitializeClient(
     ConnManState & cmstate,
     NetworkConfig & netcfg,
     std::string ipv4server,
@@ -93,7 +93,7 @@ ConnMan::initializeClient(
 
 
 uint64_t
-ConnMan::readyCount(
+ConnMan::ReadyCount(
     ConnManState & cmstate
 )
 {
@@ -105,7 +105,7 @@ ConnMan::readyCount(
 }
 
 void
-ConnMan::cleanup(
+ConnMan::Cleanup(
     ConnManState & state
 )
 {
@@ -113,6 +113,28 @@ ConnMan::cleanup(
     state.cmmutex.destroy();
 }
 
+uint32_t
+ConnMan::Query(
+    Connection& who,
+    uint32_t what,
+    uint32_t why
+)
+{
+    who.reqstatusmutex.lock();
+    for (auto &rs : who.reqstatus)
+    {
+        if (rs.first == what)
+        {
+            if (rs.second.state == (Connection::RequestStatus::State)why)
+            {
+                who.reqstatusmutex.unlock();
+                return true;
+            }
+        }
+    }
+    who.reqstatusmutex.unlock();
+    return false;
+}
 
 uint32_t
 ConnMan::SendReliable(
@@ -124,7 +146,7 @@ ConnMan::SendReliable(
 )
 {
     Packet packet;
-
+    Connection::RequestStatus status;
 
     memset(packet.buffer, 0, MAX_PACKET_SIZE);
     packet.buffersize = sizeof(MESG::HEADER) + sizeof(GENERAL);
@@ -138,10 +160,17 @@ ConnMan::SendReliable(
     pMsg->header.mode = (uint8_t)MESG::HEADER::Mode::Reliable;
 
     packet.ackhandler = ackhandler;
+
+    status.seq = pMsg->header.seq;
+    status.startack = clock::now();
+    status.endack = clock::now();
+    status.state = Connection::RequestStatus::State::NEW;
+    status.packet = packet;
+    AddRequestStatus(connection, status, status.seq);
+
     //std::cout << "Push Reliable: " << CodeName[pMsg->header.code] << std::endl;
     connection.txpacketsreliable.push(packet);
-    return 0;
-
+    return status.seq;
 }
 
 
@@ -209,7 +238,7 @@ ConnMan::SendPing(
 }
 
 uint64_t
-ConnMan::sendIdentifyTo(
+ConnMan::SendIdentifyTo(
     ConnManState & cmstate,
     Address to,
     std::string playername,
@@ -230,6 +259,8 @@ ConnMan::sendIdentifyTo(
     cmstate.localconn.who = to;
     cmstate.localconn.playername = playername;
     cmstate.localconn.state = Connection::State::UNINIT;
+    cmstate.localconn.reqstatusmutex.create();// TODO: Destroy when done.
+
 
     memset(packet.buffer, 0, MAX_PACKET_SIZE);
     packet.buffersize = sizeof(MESG::HEADER) + sizeof(IDENTIFY);
@@ -259,7 +290,7 @@ ConnMan::sendIdentifyTo(
 }
 
 uint64_t
-ConnMan::sendGrantTo(
+ConnMan::SendGrantTo(
     ConnManState & cmstate,
     Address to,
     uint32_t id,
@@ -286,7 +317,7 @@ ConnMan::sendGrantTo(
 }
 
 uint64_t
-ConnMan::sendDenyTo(
+ConnMan::SendDenyTo(
     ConnManState & cmstate,
     Address to,
     std::string playername
@@ -334,9 +365,17 @@ ConnMan::SendAckTo(
     cmstate.txpacketsunreliable.push(packet);
 }
 
+uint32_t
+GetPacketSequence(
+    Packet & packet
+)
+{
+    MESG* m = (MESG*)packet.buffer;
+    return m->header.seq;
+}
 
 void
-ConnMan::updateClient(
+ConnMan::UpdateClient(
     ConnManState & cmstate,
     uint32_t ms_elapsed
 )
@@ -365,19 +404,30 @@ ConnMan::updateClient(
     auto & c = cmstate.localconn;
     if (c.state != Connection::State::UNINIT)
     {
-        if (c.state == Connection::State::IDLE)
-        {
-            if (!c.txpacketsreliable.empty())
-            {
-                c.txpacketpending = c.txpacketsreliable.front();
-                MESG* m = (MESG*)c.txpacketpending.buffer;
-                c.state = Connection::State::WAITONACK;
-                c.acktime = clock::now();
+        //if (c.state == Connection::State::IDLE)
+        //{
+        //    if (!c.txpacketsreliable.empty())
+        //    {
+        //        c.txpacketpending = c.txpacketsreliable.front();
+        //        MESG* m = (MESG*)c.txpacketpending.buffer;
+        //        c.state = Connection::State::WAITONACK;
+        //        c.acktime = clock::now();
 
-                //std::cout << "Popped Reliable: " << CodeName[m->header.code] << std::endl;
-                Network::write(cmstate.netstate, c.txpacketpending);
-                c.txpacketsreliable.pop();
-            }
+        //        //std::cout << "Popped Reliable: " << CodeName[m->header.code] << std::endl;
+        //        Network::write(cmstate.netstate, c.txpacketpending);
+        //        c.txpacketsreliable.pop();
+        //    }
+        //}
+
+        if (!c.txpacketsreliable.empty())
+        {
+            c.txpacketpending = c.txpacketsreliable.front();
+            // NEW --> PENDING
+            SetRequestStatusState(c, GetPacketSequence(c.txpacketpending), Connection::RequestStatus::State::PENDING, true);
+
+            //std::cout << "Popped Reliable: " << CodeName[m->header.code] << std::endl;
+            Network::write(cmstate.netstate, c.txpacketpending);
+            c.txpacketsreliable.pop();
         }
 
 
@@ -403,18 +453,24 @@ ConnMan::updateClient(
         //
         // Time out those waiting for an ACK
         //
-        if (c.state == Connection::State::WAITONACK)
+        //if (c.state == Connection::State::WAITONACK)
+        c.reqstatusmutex.lock();
+        for (auto & pair : c.reqstatus)
         {
-            duration dur = clock::now() - c.acktime;
-            if (dur.count() > cmstate.acktimeout_ms)
+            if (pair.second.state == Connection::RequestStatus::State::PENDING)
             {
-                cmstate.onevent(cmstate.oneventcontext,
-                                ConnManState::OnEventType::ACK_TIMEOUT,
-                                &c,
-                                &c.txpacketpending);
+                duration dur = clock::now() - pair.second.startack;
+                if (dur.count() > cmstate.acktimeout_ms)
+                {
+                    SetRequestStatusState(c, GetPacketSequence(c.txpacketpending), Connection::RequestStatus::State::FAILED, false);
+                    cmstate.onevent(cmstate.oneventcontext,
+                                    ConnManState::OnEventType::ACK_TIMEOUT,
+                                    &c,
+                                    &c.txpacketpending);
+                }
             }
         }
-
+        c.reqstatusmutex.unlock();
         //
         // Connection hasn't seen traffic in over 10 seconds
         // Notify user, and drop Connection
@@ -506,17 +562,19 @@ ConnMan::ConnManClientIOHandler(
                     pConn = &cmstate.localconn;
                     if (pConn)
                     {
-                        if (pConn->state == Connection::State::WAITONACK)
+                        MESG* pMsg = (MESG*)request->packet.buffer;
+
+                        uint32_t ack = pMsg->payload.ack.ack;
+                        uint32_t hope = GetPacketSequence(pConn->txpacketpending);//((MESG*)pConn->txpacketpending.buffer)->header.seq;
+                        pConn->reqstatusmutex.lock();
+                        if (pConn->reqstatus[hope].state == Connection::RequestStatus::State::PENDING)
                         {
-                            MESG* pMsg = (MESG*)request->packet.buffer;
-
-                            uint32_t ack = pMsg->payload.ack.ack;
-                            uint32_t hope = ((MESG*)pConn->txpacketpending.buffer)->header.seq;
-
                             if (ack == hope)
                             {
-                                pConn->state = Connection::State::ACKRECEIVED;
+                                //pConn->state = Connection::State::ACKRECEIVED;
                                 //std::cout << "Rx Ack: " << ack << std::endl;
+                                pConn->reqstatus[ack].endack = clock::now();
+                                pConn->reqstatus[ack].state = Connection::RequestStatus::State::SUCCEEDED;
                                 cmstate.onevent(cmstate.oneventcontext,
                                                 ConnManState::OnEventType::ACK_RECEIVED,
                                                 pConn,
@@ -529,8 +587,9 @@ ConnMan::ConnManClientIOHandler(
                         }
                         else
                         {
-                            std::cout << "Weird: received an Ack but wasn't expecting it." << std::endl;
+                            std::cout << "Weird: recieved an Ack too late." << ack << std::endl;
                         }
+                        pConn->reqstatusmutex.unlock();
                     }
                     else
                     {
@@ -614,7 +673,7 @@ ConnMan::ConnManClientIOHandler(
 }
 
 void
-ConnMan::updateServer(
+ConnMan::UpdateServer(
     ConnManState & cmstate,
     uint32_t ms_elapsed
 )
@@ -804,7 +863,7 @@ ConnMan::ConnManServerIOHandler(
                                                     &connection,
                                                     &request->packet);
 
-                                    ConnMan::sendGrantTo(cmstate,
+                                    ConnMan::SendGrantTo(cmstate,
                                                          connection.who,
                                                          connection.id,
                                                          connection.playername);
@@ -812,7 +871,7 @@ ConnMan::ConnManServerIOHandler(
                                 else
                                 {
                                     // Deny - player name already exists
-                                    ConnMan::sendDenyTo(cmstate,
+                                    ConnMan::SendDenyTo(cmstate,
                                                         request->packet.address,
                                                         GetPlayerName(request->packet));
                                     std::cout << "Tx Deny: Player Name already exists\n";
@@ -821,7 +880,7 @@ ConnMan::ConnManServerIOHandler(
                             else
                             {
                                 // Deny - password doesn't match
-                                ConnMan::sendDenyTo(cmstate,
+                                ConnMan::SendDenyTo(cmstate,
                                                     request->packet.address,
                                                     GetPlayerName(request->packet));
                                 std::cout << "Tx Deny: Password is bad\n";
@@ -830,7 +889,7 @@ ConnMan::ConnManServerIOHandler(
                         else
                         {
                             // Deny - Game name doesn't match
-                            ConnMan::sendDenyTo(cmstate,
+                            ConnMan::SendDenyTo(cmstate,
                                                 request->packet.address,
                                                 GetPlayerName(request->packet));
                             std::cout << "Tx Deny: Game name is unknown\n";
@@ -1202,6 +1261,42 @@ GetGamePass(
     MESG* pMsg = (MESG*)packet.buffer;
     return std::string(pMsg->payload.identify.gamepass,
         strlen(pMsg->payload.identify.gamepass));
+}
+
+void
+SetRequestStatusState(
+    Connection & connection,
+    uint32_t sid,
+    Connection::RequestStatus::State state,
+    bool lock
+)
+{
+    connection.reqstatusmutex.lock();
+    connection.reqstatus[sid].state = state;
+    connection.reqstatusmutex.unlock();
+}
+
+void
+AddRequestStatus(
+    Connection & connection,
+    Connection::RequestStatus & rs,
+    uint32_t sid
+)
+{
+    connection.reqstatusmutex.lock();
+    connection.reqstatus[sid] = rs;
+    connection.reqstatusmutex.unlock();
+}
+
+void
+RemoveRequestStatus(
+    Connection & connection,
+    uint32_t sid
+)
+{
+    connection.reqstatusmutex.lock();
+    connection.reqstatus.erase(sid);
+    connection.reqstatusmutex.unlock();
 }
 
 } // namespace bali
