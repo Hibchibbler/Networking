@@ -45,7 +45,7 @@ InitializeConnection(
     // But we don't know it's ID yet
     // because we have not yet been GRANTed
     pConn->id = 0;
-    pConn->state = Connection::State::UNINIT;
+    pConn->state = Connection::State::NEW;
     pConn->curseq = 0;
     pConn->curack = 0;
     pConn->highseq = 0;
@@ -216,43 +216,6 @@ ConnMan::SendUnreliable(
     Network::write(cmstate.netstate, packet);
 }
 
-void
-ConnMan::SendPing(
-    ConnManState & cmstate,
-    Connection & connection,
-    bool ping
-)
-{
-    Packet packet;
-    Connection* pConn = &connection;
-    if (pConn)
-    {
-        memset(packet.buffer, 0, MAX_PACKET_SIZE);
-        packet.buffersize = sizeof(MESG::HEADER) + sizeof(PINGPONG);
-        packet.address = pConn->who;
-
-        MESG* pMsg = (MESG*)packet.buffer;
-        AddMagic(pMsg);
-        if (ping) {
-            pMsg->header.code = (uint8_t)MESG::HEADER::Codes::Ping;
-        }
-        else
-        {
-            pMsg->header.code = (uint8_t)MESG::HEADER::Codes::Pong;
-        }
-        pMsg->header.id = pConn->id;
-        pMsg->header.seq = InterlockedIncrement(&pConn->curuseq);
-        ///
-        pMsg->header.mode = (uint8_t)MESG::HEADER::Mode::Unreliable;
-
-        packet.ackhandler = nullptr;
-
-        pConn->pingstart = clock::now();
-        //std::cout << "Push Unreliable: " << CodeName[pMsg->header.code] << std::endl;
-        Network::write(cmstate.netstate, packet);
-    }
-}
-
 uint64_t
 ConnMan::SendIdentifyTo(
     ConnManState & cmstate,
@@ -274,7 +237,7 @@ ConnMan::SendIdentifyTo(
     InitializeConnection(&cmstate.localconn);
     cmstate.localconn.who = to;
     cmstate.localconn.playername = playername;
-    cmstate.localconn.state = Connection::State::UNINIT;
+    cmstate.localconn.state = Connection::State::NEW;
 
 
     memset(packet.buffer, 0, MAX_PACKET_SIZE);
@@ -298,7 +261,7 @@ ConnMan::SendIdentifyTo(
     memcpy(pMsg->payload.identify.gamepass,
            gamepass.c_str(),
            gamepass.size());
-    std::cout << "Push Unreliable: " << CodeName[pMsg->header.code] << std::endl;
+
     Network::write(cmstate.netstate, packet);
 
     return 0;
@@ -326,7 +289,7 @@ ConnMan::SendGrantTo(
     memcpy(pMsg->payload.identify.playername,
            playername.c_str(),
            playername.size());
-    //std::cout << "Push Unreliable: " << CodeName[pMsg->header.code] << std::endl;
+
     Network::write(cmstate.netstate, packet);
     return 0;
 }
@@ -352,7 +315,7 @@ ConnMan::SendDenyTo(
     memcpy(pMsg->payload.identify.playername,
            playername.c_str(),
            playername.size());
-    //std::cout << "Push Unreliable: " << CodeName[pMsg->header.code] << std::endl;
+
     Network::write(cmstate.netstate, packet);
     return 0;
 }
@@ -375,8 +338,8 @@ ConnMan::SendAckTo(
     pMsg->header.code = (uint8_t)MESG::HEADER::Codes::Ack;
     pMsg->header.id = id;
     pMsg->header.seq = 13;
-    pMsg->payload.ack.ack = ack;
-    //std::cout << "Push Unreliable: " << CodeName[pMsg->header.code] << std::endl;
+    pMsg->header.ack = ack;
+
     Network::write(cmstate.netstate, packet);
 }
 
@@ -407,7 +370,7 @@ ConnMan::UpdateClient(
     // from last packet.
 
     auto * pConn = &cmstate.localconn;
-    if (pConn->state != Connection::State::UNINIT)
+    if (pConn->state != Connection::State::NEW)
     {
         //
         // Service incoming packets
@@ -446,6 +409,10 @@ ConnMan::UpdateClient(
                                     &pair.second.packet);
                 }
             }
+            else if (pair.second.state == Connection::RequestStatus::State::SUCCEEDED)
+            {
+
+            }
         }
         pConn->reqstatusmutex.unlock();
         //
@@ -472,7 +439,124 @@ ConnMan::UpdateClient(
     cmstate.connectionsmutex.unlock();
    
 }
+void
+ConnMan::ProcessGrant(
+    ConnManState& cmstate,
+    Connection* pConn,
+    Request* request
+)
+{
+    std::string playername = GetPlayerName(request->packet);
+    if (playername == pConn->playername)
+    {
+        pConn->lastrxtime = clock::now();
+        pConn->id = GetConnectionId(request->packet);
+        pConn->state = Connection::State::READY;
+        cmstate.onevent(cmstate.oneventcontext,
+                        ConnManState::OnEventType::GRANTED,
+                        pConn,
+                        &request->packet);
+    }
+    else
+    {
+        std::cout << "Weird: Client Rx Grant contains unknown Player Name\n";
+    }
+}
+void
+ConnMan::ProcessDeny(
+    ConnManState& cmstate,
+    Connection* pConn,
+    Request* request
+)
+{
+    std::string playername = GetPlayerName(request->packet);
+    if (playername == pConn->playername)
+    {
+        cmstate.onevent(cmstate.oneventcontext,
+            ConnManState::OnEventType::DENIED,
+            pConn,
+            &request->packet);
+    }
+    else
+    {
+        std::cout << "Weird: Client Rx Deny contains unknown Player Name\n";
+    }
+}
 
+void
+ConnMan::ProcessGeneral(
+    ConnManState& cmstate,
+    Connection* pConn,
+    Request* request
+)
+{
+    if (pConn)
+    {
+        pConn->rxpackets.push(request->packet);
+        pConn->lastrxtime = clock::now();
+        /*
+        On Packet Receive, If packet is reliable, Then send Ack packet unreliably.
+        */
+        MESG* msg = (MESG*)request->packet.buffer;
+        if (msg->header.mode == (uint8_t)MESG::HEADER::Mode::Reliable)
+        {
+            ConnMan::SendAckTo(cmstate, pConn->who, pConn->id, msg->header.seq);
+        }
+    }
+    else
+    {
+        std::cout << "Client Rx Packet from unknown origin: tossing." << std::endl;
+    }
+}
+
+void
+ConnMan::ProcessAck(
+    ConnManState& cmstate,
+    Connection* pConn,
+    Request* request
+)
+{
+    if (pConn)
+    {
+        MESG* pMsg = (MESG*)request->packet.buffer;
+
+        uint32_t ack = pMsg->header.ack;
+        pConn->reqstatusmutex.lock();
+
+        if (pConn->reqstatus.count(ack) == 1)
+        {
+            if (pConn->reqstatus[ack].state == Connection::RequestStatus::State::PENDING)
+            {
+                pConn->lastrxtime = clock::now();
+                pConn->reqstatus[ack].endtime = clock::now();
+                pConn->reqstatus[ack].state = Connection::RequestStatus::State::SUCCEEDED;
+                cmstate.onevent(cmstate.oneventcontext,
+                    ConnManState::OnEventType::ACK_RECEIVED,
+                    pConn,
+                    &pConn->reqstatus[ack].packet);
+            }
+            else
+            {
+                // Request has already been FAILED, but not yet removed
+                // from the request map
+                //
+                std::cout << "Fact: Rx'd Ack for FAILED request: " << ack << std::endl;
+            }
+        }
+        else
+        {
+            // Request has alreadt been FAILED, and removed
+            // from the request map
+            //
+            std::cout << "Fact: Rx'd Ack for old FAILED request: " << ack << std::endl;
+        }
+        pConn->reqstatusmutex.unlock();
+    }
+    else
+    {
+        std::cout << "Problem: Rx'd ACK Packet contains unknown ID!\n";
+    }
+}
 void
 ConnMan::ConnManClientIOHandler(
     void* cmstate_,
@@ -491,14 +575,13 @@ ConnMan::ConnManClientIOHandler(
     if (request->ioType == Request::IOType::READ)
     {
         MESG* m = (MESG*)request->packet.buffer;
-        std::cout << "Client Rx: " << CodeName[m->header.code] << std::endl;
+        std::cout << "Client Rx: " << CodeName[m->header.code] << "[" <<m->header.seq << "]" << "[" << m->header.ack << "]" << std::endl;
 
 
         if (IsMagicGood(request->packet))
         {
             if (IsSizeValid(request->packet))
             {
-                cmstate.localconn.lastrxtime = clock::now();
                 if (IsCode(request->packet, MESG::HEADER::Codes::Grant))
                 {
                     //
@@ -507,120 +590,28 @@ ConnMan::ConnManClientIOHandler(
                     // Therefore, we find the associated connection
                     // by name
                     //
-                    std::string playername = GetPlayerName(request->packet);
-                    if (playername == cmstate.localconn.playername)
-                    {
-                        cmstate.localconn.id = GetConnectionId(request->packet);
-                        cmstate.localconn.state = Connection::State::IDLE;
-                        cmstate.onevent(cmstate.oneventcontext, ConnManState::OnEventType::GRANTED, &cmstate.localconn, &request->packet);
-                    }
-                    else
-                    {
-                        std::cout << "Weird: Client Rx Grant contains unknown Player Name\n";
-                    }
+                    Connection* pConn = &cmstate.localconn;
+                    ConnMan::ProcessGrant(cmstate, pConn, request);
                 }
                 else if (IsCode(request->packet, MESG::HEADER::Codes::Deny))
                 {
-                    std::string playername = GetPlayerName(request->packet);
-                    if (playername == cmstate.localconn.playername)
-                    {
-                        cmstate.onevent(cmstate.oneventcontext, ConnManState::OnEventType::DENIED, &cmstate.localconn, &request->packet);
-                    }
-                    else
-                    {
-                        std::cout << "Weird: Client Rx Deny contains unknown Player Name\n";
-                    }
+                    Connection* pConn = &cmstate.localconn;
+                    ProcessDeny(cmstate, pConn, request);
                 }
                 else if (IsCode(request->packet, MESG::HEADER::Codes::Ack))
                 {
                     // Rx'd an ACk. 
                     // Something is eagerly awaiting this i'm sure.
-                    Connection* pConn;
-                    pConn = &cmstate.localconn;
-                    if (pConn)
-                    {
-                        MESG* pMsg = (MESG*)request->packet.buffer;
-
-                        uint32_t ack = pMsg->payload.ack.ack;
-                        pConn->reqstatusmutex.lock();
-                        
-                        if (pConn->reqstatus.count(ack) == 1)
-                        {
-                            if (pConn->reqstatus[ack].state == Connection::RequestStatus::State::PENDING)
-                            {
-                                pConn->reqstatus[ack].endtime = clock::now();
-                                pConn->reqstatus[ack].state = Connection::RequestStatus::State::SUCCEEDED;
-                                cmstate.onevent(cmstate.oneventcontext,
-                                                ConnManState::OnEventType::ACK_RECEIVED,
-                                                pConn,
-                                                &pConn->reqstatus[ack].packet);
-                            }
-                            else
-                            {
-                                std::cout << "Weird: Got an Ack for something not PENDING." << ack << std::endl;
-                            }
-                        }
-                        pConn->reqstatusmutex.unlock();
-                    }
-                    else
-                    {
-                        std::cout << "Problem: Rx'd ACK Packet contains unknown ID!\n";
-                    }
+                    Connection* pConn = &cmstate.localconn;
+                    ConnMan::ProcessAck(cmstate, pConn, request);
                 }
-                //else if (IsCode(request->packet, MESG::HEADER::Codes::Ping))
-                //{
-                //    Connection* pConn;
-                //    pConn = pConn = &cmstate.localconn;
-                //    if (pConn)
-                //    {
-                //        ConnMan::SendPing(cmstate, *pConn, false); // Pong
-                //    }
-                //}
-                //else if (IsCode(request->packet, MESG::HEADER::Codes::Pong))
-                //{
-                //    Connection* pConn;
-                //    pConn = pConn = &cmstate.localconn;
-                //    if (pConn)
-                //    {
-                //        pConn->pingend = clock::now();
-                //        duration elapsed = pConn->pingend - pConn->pingstart;
-
-                //        pConn->pingtimes.push_back(elapsed);
-                //        if (pConn->pingtimes.size() > 50)
-                //            pConn->pingtimes.pop_front();
-
-                //        pConn->avgping = 0;
-                //        for (auto d : pConn->pingtimes)
-                //        {
-                //            pConn->avgping += d.count();
-                //        }
-                //        pConn->avgping /= pConn->pingtimes.size();
-                //        std::cout << elapsed.count() << "  :  " << pConn->avgping << std::endl;
-                //    }
-                //}
                 else
                 {
                     //
                     // Rx'd something other than Identify, or Ack
                     //
-                    Connection* pConn = nullptr;
-                    pConn = pConn = &cmstate.localconn;
-                    if (pConn)
-                    {
-                        pConn->rxpackets.push(request->packet);
-                        pConn->lastrxtime = clock::now();
-                        /*
-                            On Packet Receive, If packet is reliable, Then send Ack packet unreliably.
-                        */
-                        MESG* msg = (MESG*)request->packet.buffer;
-                        if (msg->header.mode == (uint8_t)MESG::HEADER::Mode::Reliable)
-                        {
-                            SendAckTo(cmstate, pConn->who, pConn->id, msg->header.seq);
-                        }
-                    }
-                    else
-                    {
-                    }
+                    Connection* pConn = &cmstate.localconn;
+                    ConnMan::ProcessGeneral(cmstate, pConn, request);
                 }
             }
             else
@@ -639,7 +630,7 @@ ConnMan::ConnManClientIOHandler(
     else if (request->ioType == Request::IOType::WRITE)
     {
         MESG* m = (MESG*)request->packet.buffer;
-        std::cout << "Client Tx: " << CodeName[m->header.code] << std::endl;
+        std::cout << "Client Tx: " << CodeName[m->header.code] << "[" << m->header.seq << "]" << "[" << m->header.ack << "]" << std::endl;
     }
     cmstate.connectionsmutex.unlock();
 }
@@ -672,7 +663,6 @@ ConnMan::UpdateServer(
                             ConnManState::OnEventType::MESSAGE,
                             &(*pConn),
                             &packet);
-
         }
 
         pConn->reqstatusmutex.lock();
@@ -690,11 +680,15 @@ ConnMan::UpdateServer(
                                     &pair.second.packet);
                 }
             }
+            else if (pair.second.state == Connection::RequestStatus::State::SUCCEEDED)
+            {
+
+            }
         }
         pConn->reqstatusmutex.unlock();
 
-        // Server sent pings to client occasionally.
-        //
+        //// Server sent pings to client occasionally.
+        ////
         //duration hb = clock::now() - pConn->heartbeat;
         //if (hb.count() > cmstate.heartbeat_ms)
         //{
@@ -728,7 +722,78 @@ ConnMan::UpdateServer(
     }
     cmstate.connectionsmutex.unlock();
 }
+void
+ConnMan::ProcessIdentify(
+    ConnManState& cmstate,
+    Request* request
+)
+{
+    if (cmstate.connections.size() < cmstate.numplayers)
+    {
+        if (cmstate.gamename == GetGameName(request->packet))
+        {
+            if (cmstate.gamepass == GetGamePass(request->packet))
+            {
+                std::random_device rd;     // only used once to initialise (seed) engine
+                std::mt19937 rng(rd());    // random-number engine used (Mersenne-Twister in this case)
+                std::uniform_int_distribution<uint32_t> uni(1, 65536); // guaranteed unbiased
 
+                auto random_integer = uni(rng);
+
+                std::string pn = GetPlayerName(request->packet);
+                if (ConnMan::IsPlayerNameAvailable(cmstate.connections, pn))
+                {
+                    //
+                    // Grant
+                    // Create and insert a new connection, 
+                    // randomly generate id, then send a Grant.
+                    //
+                    Connection connection;
+                    InitializeConnection(&connection);
+                    connection.playername = pn;
+                    connection.id = random_integer;
+                    connection.who = request->packet.address;
+                    connection.state = Connection::State::READY;
+
+                    cmstate.connections.push_back(connection);
+                    cmstate.onevent(cmstate.oneventcontext,
+                                    ConnManState::OnEventType::CONNECTION_ADD,
+                                    &connection,
+                                    &request->packet);
+
+                    ConnMan::SendGrantTo(cmstate,
+                                         connection.who,
+                                         connection.id,
+                                         connection.playername);
+                }
+                else
+                {
+                    // Deny - player name already exists
+                    ConnMan::SendDenyTo(cmstate,
+                                        request->packet.address,
+                                        GetPlayerName(request->packet));
+                    std::cout << "Tx Deny: Player Name already exists\n";
+                }
+            }
+            else
+            {
+                // Deny - password doesn't match
+                ConnMan::SendDenyTo(cmstate,
+                                    request->packet.address,
+                                    GetPlayerName(request->packet));
+                std::cout << "Tx Deny: Password is bad\n";
+            }
+        }
+        else
+        {
+            // Deny - Game name doesn't match
+            ConnMan::SendDenyTo(cmstate,
+                                request->packet.address,
+                                GetPlayerName(request->packet));
+            std::cout << "Tx Deny: Game name is unknown\n";
+        }
+    }
+}
 void
 ConnMan::ConnManServerIOHandler(
     void* cmstate_,
@@ -738,16 +803,12 @@ ConnMan::ConnManServerIOHandler(
 {
     bali::Network::Result result(bali::Network::ResultType::SUCCESS);
     ConnManState& cmstate = *((ConnManState*)cmstate_);
-    std::random_device rd;     // only used once to initialise (seed) engine
-    std::mt19937 rng(rd());    // random-number engine used (Mersenne-Twister in this case)
-    std::uniform_int_distribution<uint32_t> uni(1, 65536); // guaranteed unbiased
 
-    auto random_integer = uni(rng);
     cmstate.connectionsmutex.lock();
     if (request->ioType == Request::IOType::READ)
     {
         MESG* m = (MESG*)request->packet.buffer;
-        std::cout << "Server Rx: " << CodeName[m->header.code] << std::endl;
+        std::cout << "Server Rx: " << CodeName[m->header.code] << "[" << m->header.seq << "]" << "[" << m->header.ack << "]" << std::endl;
 
         /*
             If we recieve an Identify packet,
@@ -769,66 +830,7 @@ ConnMan::ConnManServerIOHandler(
                     // Therefore, an ID hasn't been
                     // generated yet - "Connection" not
                     // established.
-                    if (cmstate.connections.size() < cmstate.numplayers)
-                    {
-                        if (cmstate.gamename == GetGameName(request->packet))
-                        {
-                            if (cmstate.gamepass == GetGamePass(request->packet))
-                            {
-                                std::string pn = GetPlayerName(request->packet);
-                                if (IsPlayerNameAvailable(cmstate.connections, pn))
-                                {
-                                    //
-                                    // Grant
-                                    // Create and insert a new connection, 
-                                    // randomly generate id, then send a Grant.
-                                    //
-                                    //std::cout << "Rx Identify: " << pn << std::endl;
-                                    Connection connection;
-                                    InitializeConnection(&connection);
-                                    connection.playername = pn;
-                                    connection.id = random_integer;
-                                    connection.who = request->packet.address;
-                                    connection.state = Connection::State::IDLE;
-
-                                    cmstate.connections.push_back(connection);
-                                    cmstate.onevent(cmstate.oneventcontext,
-                                                    ConnManState::OnEventType::CONNECTION_ADD,
-                                                    &connection,
-                                                    &request->packet);
-
-                                    ConnMan::SendGrantTo(cmstate,
-                                                         connection.who,
-                                                         connection.id,
-                                                         connection.playername);
-                                }
-                                else
-                                {
-                                    // Deny - player name already exists
-                                    ConnMan::SendDenyTo(cmstate,
-                                                        request->packet.address,
-                                                        GetPlayerName(request->packet));
-                                    std::cout << "Tx Deny: Player Name already exists\n";
-                                }
-                            }
-                            else
-                            {
-                                // Deny - password doesn't match
-                                ConnMan::SendDenyTo(cmstate,
-                                                    request->packet.address,
-                                                    GetPlayerName(request->packet));
-                                std::cout << "Tx Deny: Password is bad\n";
-                            }
-                        }
-                        else
-                        {
-                            // Deny - Game name doesn't match
-                            ConnMan::SendDenyTo(cmstate,
-                                                request->packet.address,
-                                                GetPlayerName(request->packet));
-                            std::cout << "Tx Deny: Game name is unknown\n";
-                        }
-                    }
+                    ConnMan::ProcessIdentify(cmstate, request);
                 }
                 else if (IsCode(request->packet, MESG::HEADER::Codes::Ack))
                 {
@@ -836,75 +838,8 @@ ConnMan::ConnManServerIOHandler(
                     // Something is eagerly awaiting this i'm sure.
                     uint32_t cid = GetConnectionId(request->packet);
                     Connection* pConn = ConnMan::GetConnectionById(cmstate.connections, cid);
-                    if (pConn)
-                    {
-                        pConn->lastrxtime = clock::now();
-                        MESG* pMsg = (MESG*)request->packet.buffer;
-
-                        uint32_t ack = pMsg->payload.ack.ack;
-
-                        pConn->reqstatusmutex.lock();
-
-                        if (pConn->reqstatus.count(ack) == 1)
-                        {
-                            if (pConn->reqstatus[ack].state == Connection::RequestStatus::State::PENDING)
-                            {
-                                //pConn->state = Connection::State::ACKRECEIVED;
-                                //std::cout << "Rx Ack: " << ack << std::endl;
-                                pConn->reqstatus[ack].endtime = clock::now();
-                                pConn->reqstatus[ack].state = Connection::RequestStatus::State::SUCCEEDED;
-                                cmstate.onevent(cmstate.oneventcontext,
-                                                ConnManState::OnEventType::ACK_RECEIVED,
-                                                pConn,
-                                                &pConn->reqstatus[ack].packet);
-
-                            }
-                            else
-                            {
-                                std::cout << "Weird: recieved an Ack too late." << ack << std::endl;
-                            }
-                        }
-                        pConn->reqstatusmutex.unlock();
-
-                    }
-                    else
-                    {
-                        std::cout << "Problem: Rx'd ACK Packet contains unknown ID!\n";
-                    }
+                    ConnMan::ProcessAck(cmstate, pConn, request);
                 }
-                //else if (IsCode(request->packet, MESG::HEADER::Codes::Ping))
-                //{
-                //    uint32_t cid = GetConnectionId(request->packet);
-                //    Connection* pConn = ConnMan::GetConnectionById(cmstate.connections, cid);
-                //    if (pConn)
-                //    {
-                //        pConn->lastrxtime = clock::now();
-                //        ConnMan::SendPing(cmstate, *pConn, false); // Pong
-                //    }
-                //}
-                //else if (IsCode(request->packet, MESG::HEADER::Codes::Pong))
-                //{
-                //    uint32_t cid = GetConnectionId(request->packet);
-                //    Connection* pConn = ConnMan::GetConnectionById(cmstate.connections, cid);
-                //    if (pConn)
-                //    {
-                //        pConn->lastrxtime = clock::now();
-                //        pConn->pingend = clock::now();
-                //        duration d = pConn->pingend - pConn->pingstart;
-
-                //        pConn->pingtimes.push_back(d);
-                //        if (pConn->pingtimes.size() > 15)
-                //            pConn->pingtimes.pop_front();
-
-                //        pConn->avgping = 0;
-                //        for (auto d : pConn->pingtimes)
-                //        {
-                //            pConn->avgping += d.count();
-                //        }
-                //        pConn->avgping /= pConn->pingtimes.size();
-                //        std::cout << "AVGPING: " << pConn->avgping <<std::endl;
-                //    }
-                //}
                 else
                 {
                     //
@@ -914,24 +849,7 @@ ConnMan::ConnManServerIOHandler(
                     uint32_t cid;
                     cid = GetConnectionId(request->packet);
                     pConn = ConnMan::GetConnectionById(cmstate.connections, cid);
-                    if (pConn)
-                    {
-                        pConn->rxpackets.push(request->packet);
-                        pConn->lastrxtime = clock::now();
-                        /*
-                            On Packet Receive, If packet is reliable, Then send Ack packet unreliably.
-                        */
-                        MESG* msg = (MESG*)request->packet.buffer;
-                        if (msg->header.mode == (uint8_t)MESG::HEADER::Mode::Reliable)
-                        {
-                            //Sleep(30);//HACK BITCHES TO CAUSE FAILURE IN Client -> SendReliable()
-                            SendAckTo(cmstate, pConn->who, pConn->id, msg->header.seq);
-                        }
-                        
-                    }
-                    else
-                    {
-                    }
+                    ConnMan::ProcessGeneral(cmstate, pConn, request);
                 }
             }
             else
@@ -953,7 +871,7 @@ ConnMan::ConnManServerIOHandler(
     else if (request->ioType == Request::IOType::WRITE)
     {
         MESG* m = (MESG*)request->packet.buffer;
-        std::cout << "Server Tx: " << CodeName[m->header.code] << std::endl;
+        std::cout << "Server Tx: " << CodeName[m->header.code] << "[" << m->header.seq << "]" << "[" << m->header.ack << "]" << std::endl;
     }
 
     cmstate.connectionsmutex.unlock();
@@ -981,8 +899,6 @@ SizeofPayload(
     if (code == MESG::HEADER::Codes::Deny) { payloadSize += sizeof(DENY); }
     if (code == MESG::HEADER::Codes::General) { payloadSize += sizeof(GENERAL); }
     if (code == MESG::HEADER::Codes::Ack) { payloadSize += sizeof(ACK); }
-    if (code == MESG::HEADER::Codes::Ping ||
-        code == MESG::HEADER::Codes::Pong) { payloadSize += sizeof(PINGPONG); }
 
     return payloadSize;
 }

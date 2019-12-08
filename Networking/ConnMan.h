@@ -41,7 +41,6 @@ struct GENERAL
 
 struct ACK
 {
-    uint32_t ack;
 };
 
 struct PINGPONG
@@ -59,9 +58,7 @@ struct MESG
             Grant,
             Deny,
             General,
-            Ack,
-            Ping,
-            Pong
+            Ack
         };
 
         enum class Mode {
@@ -73,6 +70,7 @@ struct MESG
         uint8_t mode;
         uint16_t id;
         uint32_t seq;
+        uint32_t ack;
 
     }header;
 
@@ -82,7 +80,6 @@ struct MESG
         DENY        deny;       // Server Rx
         GENERAL     general;    // Client Rx & Server Rx
         ACK         ack;
-        PINGPONG    pingpong;
     }payload;
 };
 
@@ -91,9 +88,7 @@ static const char* CodeName[] = {
     "Grant",
     "Deny",
     "General",
-    "Ack",
-    "Ping",
-    "Pong"
+    "Ack"
 };
 
 class Connection
@@ -114,13 +109,13 @@ public:
         State    state;
         Packet   packet;
     };
-
+    enum class Locality {
+        REMOTE,
+        LOCAL
+    };
     enum class State {
-        UNINIT,
-        IDLE,
-        WAITONACK,
-        ACKRECEIVED,
-        ACKNOTRECEIVED
+        NEW,
+        READY
     };
 
     std::string         playername;
@@ -135,6 +130,10 @@ public:
     uint32_t            curuseq; // Unreliable
     uint32_t            curuack; // Unreliable
     uint32_t            highuseq;
+
+    Locality            locality;   // TODO: was thinking this could
+                                    // be used to merge client and server code
+                                    // in a sane manner.
 
     clock::time_point   lastrxtime;
     clock::time_point   lasttxtime;
@@ -341,14 +340,6 @@ public:
         uint32_t ack
     );
 
-    static 
-    void
-    SendPing(
-        ConnManState & cmstate,
-        Connection & connection,
-        bool ping
-    );
-
     static
     void
     ConnManServerIOHandler(
@@ -417,6 +408,45 @@ public:
         ConnManState & cmstate,
         Address to,
         std::string playername
+    );
+
+    static
+    void
+    ProcessIdentify(
+        ConnManState& cmstate,
+        Request* request
+    );
+
+    static
+    void
+    ProcessGeneral(
+        ConnManState& cmstate,
+        Connection* pConn,
+        Request* request
+    );
+
+    static
+    void
+    ProcessAck(
+        ConnManState& cmstate,
+        Connection* pConn,
+        Request* request
+    );
+
+    static
+    void
+    ProcessDeny(
+        ConnManState& cmstate,
+        Connection* pConn,
+        Request* request
+    );
+
+    static
+    void
+    ProcessGrant(
+        ConnManState& cmstate,
+        Connection* pConn,
+        Request* request
     );
 };
 
