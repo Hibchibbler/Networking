@@ -375,9 +375,17 @@ void* Network::WorkerThread(NetworkState* netstate)
         }
         else
         {
-            // Problem
-            std::cout << "Worker: ERROR GetQueuedCompletionStatus()\n";
-            return NULL;
+            DWORD gle = GetLastError();
+            if (gle == ERROR_PORT_UNREACHABLE)
+            {
+                std::cout << "Worker: A sent packet was rejected\n" << std::endl;
+            }
+            else
+            {
+                // Problem
+                std::cout << "Worker: ERROR GetQueuedCompletionStatus(): gle=" << gle << std::endl;
+                return NULL;
+            }
         }
     }
     std::cout << "Worker: Shutdown Complete\n";

@@ -103,13 +103,13 @@ public:
     struct RequestStatus
     {
         enum class State {
-            NEW,
             PENDING,
             FAILED,
             SUCCEEDED
         };
-        clock::time_point startack;
-        clock::time_point endack;
+        clock::time_point starttime;
+        clock::time_point endtime;
+
         uint32_t seq;
         State    state;
         Packet   packet;
@@ -136,9 +136,8 @@ public:
     uint32_t            curuack; // Unreliable
     uint32_t            highuseq;
 
-    clock::time_point   checkintime;
-    clock::time_point   starttime;
-    clock::time_point   endtime;
+    clock::time_point   lastrxtime;
+    clock::time_point   lasttxtime;
 
     clock::time_point   heartbeat;
     clock::time_point   pingstart;
@@ -148,12 +147,10 @@ public:
     float               avgping;
 
     clock::time_point   acktime;
-    std::queue<Packet>  txpacketsreliable; // Reliability is managed per-connection
-    Packet              txpacketpending; //we only send 1 reliable message at a time, so,,
 
     Mutex               reqstatusmutex;
     std::map<uint32_t, RequestStatus> reqstatus;
-
+    std::queue<Packet>  rxpackets;
 };
 
 void
@@ -214,13 +211,12 @@ struct ConnManState
     uint32_t                acktimeout_ms;
 
     NetworkState            netstate;
-    Mutex                   cmmutex;
-
+    Mutex                   connectionsmutex;
     std::list<Connection>   connections;
     Connection              localconn;
 
-    std::queue<Packet>      rxpackets;
-    std::queue<Packet>      txpacketsunreliable;
+    //std::queue<Packet>      rxpackets;
+    //std::queue<Packet>      txpacketsunreliable;
 
     struct RequestState
     {
@@ -296,12 +292,25 @@ public:
 
     typedef void (*AcknowledgeHandler)(uint32_t code);
 
+    enum class QueryPredicate
+    {
+        IS_EQUAL
+    };
+
+    enum class QueryType
+    {
+        IS_STATE_EQUAL,
+        GET_PING
+    };
+
     static
     uint32_t
     Query(
         Connection& who,
-        uint32_t what,
-        uint32_t why
+        uint32_t index,
+        QueryType qt,
+        uint32_t param1,
+        uint32_t param2
     );
 
     static
