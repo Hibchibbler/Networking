@@ -39,7 +39,9 @@ ConnMan::InitializeServer(
 }
 void
 InitializeConnection(
-    Connection* pConn
+    Connection* pConn,
+    Address to,
+    std::string playername
 )
 {
     // But we don't know it's ID yet
@@ -57,6 +59,9 @@ InitializeConnection(
 
     pConn->heartbeat = clock::now();
     pConn->reqstatusmutex.create();
+
+    pConn->who = to;
+    pConn->playername = playername;
 }
 
 void
@@ -117,40 +122,6 @@ ConnMan::Cleanup(
 }
 
 uint32_t
-ConnMan::Query(
-    Connection& who,
-    uint32_t index,
-    QueryType qt,
-    uint32_t param1,
-    uint32_t param2
-)
-{
-    uint32_t ret = 0;
-    who.reqstatusmutex.lock();
-    if (qt == ConnMan::QueryType::IS_STATE_EQUAL)
-    {
-        for (auto &rs : who.reqstatus)
-        {
-            if (rs.first == index)
-            {
-                if (rs.second.state == (Connection::RequestStatus::State)param1)
-                {
-                    ret = 1;
-                    break;
-                }
-            }
-        }
-    }
-    else if (qt == ConnMan::QueryType::GET_PING)
-    {
-        duration ping = who.reqstatus[index].endtime - who.reqstatus[index].starttime;
-        ret = ping.count();
-    }
-    who.reqstatusmutex.unlock();
-    return ret;
-}
-
-uint32_t
 ConnMan::SendReliable(
     ConnManState & cmstate,
     Connection & connection,
@@ -183,8 +154,7 @@ ConnMan::SendReliable(
     status.packet = packet;
     AddRequestStatus(connection, status, status.seq);
 
-    //std::cout << "Push Reliable: " << CodeName[pMsg->header.code] << std::endl;
-    //connection.txpacketsreliable.push(packet);
+
     Network::write(cmstate.netstate, status.packet);
     return status.seq;
 }
@@ -217,10 +187,9 @@ ConnMan::SendUnreliable(
 }
 
 uint64_t
-ConnMan::SendIdentifyTo(
+ConnMan::Connect(
     ConnManState & cmstate,
-    Address to,
-    std::string playername,
+    Connection& connection,
     std::string gamename,
     std::string gamepass
 )
@@ -229,20 +198,11 @@ ConnMan::SendIdentifyTo(
     uint32_t traits = 0;
 
     //
-    // Let's put a new connection into the list
+    // Kick off the connection sequence.
     //
-
-    // But we don't know it's ID yet
-    // because we have not yet been GRANTed
-    InitializeConnection(&cmstate.localconn);
-    cmstate.localconn.who = to;
-    cmstate.localconn.playername = playername;
-    cmstate.localconn.state = Connection::State::NEW;
-
-
     memset(packet.buffer, 0, MAX_PACKET_SIZE);
     packet.buffersize = sizeof(MESG::HEADER) + sizeof(IDENTIFY);
-    packet.address = to;
+    packet.address = connection.who;
 
     MESG* pMsg = (MESG*)packet.buffer;
     AddMagic(pMsg);
@@ -251,8 +211,8 @@ ConnMan::SendIdentifyTo(
     pMsg->header.seq = 7;
 
     memcpy(pMsg->payload.identify.playername,
-           playername.c_str(),
-           playername.size());
+           connection.playername.c_str(),
+           connection.playername.size());
 
     memcpy(pMsg->payload.identify.gamename,
            gamename.c_str(),
@@ -387,7 +347,7 @@ ConnMan::UpdateClient(
         }
 
         //
-        // Update the connection states, and raise interesting facts.
+        // Update the connection states, and rise interesting facts.
         //
 
         //
@@ -402,7 +362,8 @@ ConnMan::UpdateClient(
                 if (dur.count() > cmstate.acktimeout_ms)
                 {
                     pair.second.endtime = clock::now();
-                    SetRequestStatusState(*pConn, pair.first, Connection::RequestStatus::State::FAILED, false);
+                    //SetRequestStatusState(*pConn, pair.first, Connection::RequestStatus::State::FAILED, false);
+                    pair.second.state = Connection::RequestStatus::State::FAILED;
                     cmstate.onevent(cmstate.oneventcontext,
                                     ConnManState::OnEventType::ACK_TIMEOUT,
                                     pConn,
@@ -531,9 +492,9 @@ ConnMan::ProcessAck(
                 pConn->reqstatus[ack].endtime = clock::now();
                 pConn->reqstatus[ack].state = Connection::RequestStatus::State::SUCCEEDED;
                 cmstate.onevent(cmstate.oneventcontext,
-                    ConnManState::OnEventType::ACK_RECEIVED,
-                    pConn,
-                    &pConn->reqstatus[ack].packet);
+                                ConnManState::OnEventType::ACK_RECEIVED,
+                                pConn,
+                                &pConn->reqstatus[ack].packet);
             }
             else
             {
@@ -673,7 +634,8 @@ ConnMan::UpdateServer(
                 duration dur = clock::now() - pair.second.starttime;
                 if (dur.count() > cmstate.acktimeout_ms)
                 {
-                    SetRequestStatusState(*pConn, pair.first, Connection::RequestStatus::State::FAILED, false);
+                    //SetRequestStatusState(*pConn, pair.first, Connection::RequestStatus::State::FAILED, false);
+                    pair.second.state = Connection::RequestStatus::State::FAILED;
                     cmstate.onevent(cmstate.oneventcontext,
                                     ConnManState::OnEventType::ACK_TIMEOUT,
                                     &(*pConn),
@@ -749,7 +711,9 @@ ConnMan::ProcessIdentify(
                     // randomly generate id, then send a Grant.
                     //
                     Connection connection;
-                    InitializeConnection(&connection);
+                    InitializeConnection(&connection,
+                                         request->packet.address,
+                                         pn);
                     connection.playername = pn;
                     connection.id = random_integer;
                     connection.who = request->packet.address;
@@ -1125,15 +1089,18 @@ SetRequestStatusState(
         connection.reqstatusmutex.unlock();
 }
 
+
 void
 AddRequestStatus(
     Connection & connection,
     Connection::RequestStatus & rs,
-    uint32_t sid
+    uint32_t seq
 )
 {
     connection.reqstatusmutex.lock();
-    connection.reqstatus[sid] = rs;
+    connection.reqstatus.insert(
+        std::pair<uint32_t, Connection::RequestStatus>(seq, rs)
+    );
     connection.reqstatusmutex.unlock();
 }
 
@@ -1146,6 +1113,19 @@ RemoveRequestStatus(
     connection.reqstatusmutex.lock();
     connection.reqstatus.erase(sid);
     connection.reqstatusmutex.unlock();
+}
+
+std::map<uint32_t, Connection::RequestStatus>::iterator
+GetRequestStatus(
+    Connection & connection,
+    uint32_t index
+)
+{
+    connection.reqstatusmutex.lock();
+    auto iter = connection.reqstatus.find(index);
+    connection.reqstatusmutex.unlock();
+
+    return iter;
 }
 
 } // namespace bali

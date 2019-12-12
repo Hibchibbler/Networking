@@ -164,7 +164,13 @@ void
 AddRequestStatus(
     Connection & connection,
     Connection::RequestStatus & rs,
-    uint32_t sid
+    uint32_t seq
+);
+
+std::map<uint32_t, Connection::RequestStatus>::iterator
+GetRequestStatus(
+    Connection & connection,
+    uint32_t index
 );
 
 void
@@ -175,7 +181,9 @@ RemoveRequestStatus(
 
 void
 InitializeConnection(
-    Connection* pConn
+    Connection* pConn,
+    Address to,
+    std::string playername
 );
 
 struct ConnManState
@@ -304,16 +312,6 @@ public:
 
     static
     uint32_t
-    Query(
-        Connection& who,
-        uint32_t index,
-        QueryType qt,
-        uint32_t param1,
-        uint32_t param2
-    );
-
-    static
-    uint32_t
     SendReliable(
         ConnManState & cmstate,
         Connection & connection,
@@ -385,10 +383,9 @@ public:
 
     static
     uint64_t
-    SendIdentifyTo(
+    Connect(
         ConnManState & cmstate,
-        Address to,
-        std::string playername,
+        Connection& connection,
         std::string gamename,
         std::string gamepass
     );
@@ -448,6 +445,8 @@ public:
         Connection* pConn,
         Request* request
     );
+
+
 };
 
 void
