@@ -1,4 +1,4 @@
-heartbeat_ms=1000
-stale_ms=5000
-remove_ms=10000
-acktimeout_ms=5
+heart_beat_ms=1000
+timeout_warning_ms=5000
+timeout_ms=6000
+ack_timeout_ms=6

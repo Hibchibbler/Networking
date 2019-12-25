@@ -4,39 +4,7 @@
 
 namespace bali
 {
-void
-ConnMan::InitializeServer(
-    ConnManState & cmstate,
-    NetworkConfig & netcfg,
-    uint32_t port,
-    uint32_t numplayers,
-    std::string gamename,
-    std::string gamepass,
-    ConnManState::OnEvent onevent,
-    void* oneventcontext
-)
-{
-    srand(1523791);
 
-    cmstate.port = port;
-    cmstate.numplayers = numplayers;
-    cmstate.gamename = gamename;
-    cmstate.gamepass = gamepass;
-
-    cmstate.stale_ms = netcfg.STALE_MS;
-    cmstate.remove_ms = netcfg.REMOVE_MS;
-    cmstate.acktimeout_ms = netcfg.ACKTIMEOUT_MS;
-    cmstate.heartbeat_ms = netcfg.HEARTBEAT_MS;
-
-    cmstate.done = 0;
-    cmstate.connectionsmutex.create();
-
-    cmstate.onevent = onevent;
-    cmstate.oneventcontext = oneventcontext;
-
-    Network::initialize(cmstate.netstate, 8, port, ConnMan::ConnManServerIOHandler, &cmstate);
-    Network::start(cmstate.netstate);
-}
 void
 InitializeConnection(
     Connection* pConn,
@@ -47,7 +15,7 @@ InitializeConnection(
     // But we don't know it's ID yet
     // because we have not yet been GRANTed
     pConn->id = 0;
-    pConn->state = Connection::State::NEW;
+    pConn->state = Connection::State::DEAD;
     pConn->curseq = 0;
     pConn->curack = 0;
     pConn->highseq = 0;
@@ -59,17 +27,17 @@ InitializeConnection(
 
     pConn->heartbeat = clock::now();
     pConn->reqstatusmutex.create();
+    pConn->rxpacketmutex.create();
 
     pConn->who = to;
     pConn->playername = playername;
 }
 
 void
-ConnMan::InitializeClient(
-    ConnManState & cmstate,
+ConnMan::InitializeServer(
     NetworkConfig & netcfg,
-    std::string ipv4server,
-    uint32_t port,
+    uint32_t thisport,
+    uint32_t numplayers,
     std::string gamename,
     std::string gamepass,
     ConnManState::OnEvent onevent,
@@ -78,16 +46,15 @@ ConnMan::InitializeClient(
 {
     srand(1523791);
 
-    cmstate.port = port;
-    cmstate.numplayers = 0;
-    cmstate.ipv4server = ipv4server;
+    cmstate.thisport = thisport;
+    cmstate.numplayers = numplayers;
     cmstate.gamename = gamename;
     cmstate.gamepass = gamepass;
 
-    cmstate.stale_ms = netcfg.STALE_MS;
-    cmstate.remove_ms = netcfg.REMOVE_MS;
-    cmstate.acktimeout_ms = netcfg.ACKTIMEOUT_MS;
-    cmstate.heartbeat_ms = netcfg.HEARTBEAT_MS;
+    cmstate.timeout_warning_ms = netcfg.TIMEOUT_WARNING_MS;
+    cmstate.timeout_ms = netcfg.TIMEOUT_MS;
+    cmstate.ack_timeout_ms = netcfg.ACK_TIMEOUT_MS;
+    cmstate.heart_beat_ms = netcfg.HEART_BEAT_MS;
 
     cmstate.done = 0;
     cmstate.connectionsmutex.create();
@@ -95,14 +62,52 @@ ConnMan::InitializeClient(
     cmstate.onevent = onevent;
     cmstate.oneventcontext = oneventcontext;
 
-    Network::initialize(cmstate.netstate, 8, 0, ConnMan::ConnManClientIOHandler, &cmstate);
+    std::random_device rd;     // only used once to initialise (seed) engine
+    std::mt19937 rng(rd());    // random-number engine used (Mersenne-Twister in this case)
+
+    Network::initialize(cmstate.netstate, 8, thisport, ConnMan::ConnManServerIOHandler, this);
+    Network::start(cmstate.netstate);
+}
+
+void
+ConnMan::InitializeClient(
+    NetworkConfig & netcfg,
+    uint32_t thisport,
+    uint32_t numplayers,
+    std::string gamename,
+    std::string gamepass,
+    ConnManState::OnEvent onevent,
+    void* oneventcontext
+)
+{
+    srand(1523791);
+
+    cmstate.thisport = thisport;
+    cmstate.numplayers = numplayers;
+    cmstate.gamename = gamename;
+    cmstate.gamepass = gamepass;
+
+    cmstate.timeout_warning_ms = netcfg.TIMEOUT_WARNING_MS;
+    cmstate.timeout_ms = netcfg.TIMEOUT_MS;
+    cmstate.ack_timeout_ms = netcfg.ACK_TIMEOUT_MS;
+    cmstate.heart_beat_ms = netcfg.HEART_BEAT_MS;
+
+    cmstate.done = 0;
+    cmstate.connectionsmutex.create();
+
+    cmstate.onevent = onevent;
+    cmstate.oneventcontext = oneventcontext;
+
+    std::random_device rd;     // only used once to initialise (seed) engine
+    std::mt19937 rng(rd());    // random-number engine used (Mersenne-Twister in this case)
+
+    Network::initialize(cmstate.netstate, 1, thisport, ConnMan::ConnManClientIOHandler, this);
     Network::start(cmstate.netstate);
 }
 
 
 uint64_t
 ConnMan::ReadyCount(
-    ConnManState & cmstate
 )
 {
     uint64_t cnt = 0;
@@ -114,16 +119,14 @@ ConnMan::ReadyCount(
 
 void
 ConnMan::Cleanup(
-    ConnManState & state
 )
 {
-    Network::stop(state.netstate);
-    state.connectionsmutex.destroy();
+    Network::stop(cmstate.netstate);
+    cmstate.connectionsmutex.destroy();
 }
 
 uint32_t
 ConnMan::SendReliable(
-    ConnManState & cmstate,
     Connection & connection,
     uint8_t* buffer,
     uint32_t buffersize,
@@ -162,7 +165,6 @@ ConnMan::SendReliable(
 
 void
 ConnMan::SendUnreliable(
-    ConnManState & cmstate,
     Connection & connection,
     uint8_t* buffer,
     uint32_t buffersize
@@ -187,9 +189,9 @@ ConnMan::SendUnreliable(
 }
 
 uint64_t
-ConnMan::Connect(
-    ConnManState & cmstate,
+ConnMan::SendIdentify(
     Connection& connection,
+    uint32_t randomcode,
     std::string gamename,
     std::string gamepass
 )
@@ -207,7 +209,7 @@ ConnMan::Connect(
     MESG* pMsg = (MESG*)packet.buffer;
     AddMagic(pMsg);
     pMsg->header.code = (uint8_t)MESG::HEADER::Codes::Identify;
-    pMsg->header.id = 0;
+    pMsg->header.id = randomcode;
     pMsg->header.seq = 7;
 
     memcpy(pMsg->payload.identify.playername,
@@ -222,14 +224,17 @@ ConnMan::Connect(
            gamepass.c_str(),
            gamepass.size());
 
+    connection.identtime = clock::now();
+    connection.state = Connection::State::IDENTIFYING;
+    connection.locality = Connection::Locality::LOCAL;
     Network::write(cmstate.netstate, packet);
+
 
     return 0;
 }
 
 uint64_t
 ConnMan::SendGrantTo(
-    ConnManState & cmstate,
     Address to,
     uint32_t id,
     std::string playername
@@ -256,7 +261,6 @@ ConnMan::SendGrantTo(
 
 uint64_t
 ConnMan::SendDenyTo(
-    ConnManState & cmstate,
     Address to,
     std::string playername
 )
@@ -282,7 +286,6 @@ ConnMan::SendDenyTo(
 
 void
 ConnMan::SendAckTo(
-    ConnManState & cmstate,
     Address to,
     uint32_t id,
     uint32_t ack
@@ -311,41 +314,46 @@ GetPacketSequence(
     MESG* m = (MESG*)packet.buffer;
     return m->header.seq;
 }
-
 void
-ConnMan::UpdateClient(
-    ConnManState & cmstate,
-    uint32_t ms_elapsed
+ConnMan::UpdateAlive(
+    Connection* pConn
 )
 {
+    if (pConn->state == Connection::State::GRANTED)
+    {
+        pConn->state = Connection::State::ALIVE;
+        cmstate.onevent(cmstate.oneventcontext,
+            ConnManState::OnEventType::CONNECTION_HANDSHAKE_GRANTED,
+            pConn,
+            nullptr);
+    }
 
-    cmstate.timeticks += ms_elapsed;
-    cmstate.connectionsmutex.lock();
+    if (pConn->state == Connection::State::DENIED)
+    {
+    }
 
+    if (pConn->state == Connection::State::IDENTIFYING)
+    {
 
-    // Service outgoing reliable packets.
-    //
-    // We are only going to send a packet
-    // if we are not currently waiting for an ack
-    // from last packet.
+    }
 
-    auto * pConn = &cmstate.localconn;
-    if (pConn->state != Connection::State::NEW)
+    if (pConn->state == Connection::State::ALIVE)
     {
         //
         // Service incoming packets
         //
+        pConn->rxpacketmutex.lock();
         while (!pConn->rxpackets.empty())
         {
             Packet packet;
             packet = pConn->rxpackets.front();
             pConn->rxpackets.pop();
             cmstate.onevent(cmstate.oneventcontext,
-                            ConnManState::OnEventType::MESSAGE,
+                            ConnManState::OnEventType::MESSAGE_RECEIVED,
                             pConn,
                             &packet);
         }
-
+        pConn->rxpacketmutex.unlock();
         //
         // Update the connection states, and rise interesting facts.
         //
@@ -354,55 +362,146 @@ ConnMan::UpdateClient(
         // Time out those waiting for an ACK
         //
         pConn->reqstatusmutex.lock();
-        for (auto & pair : pConn->reqstatus)
+        auto pReq = pConn->reqstatus.begin();
+        while (pReq != pConn->reqstatus.end())
         {
-            if (pair.second.state == Connection::RequestStatus::State::PENDING)
+            if (pReq->second.state == Connection::RequestStatus::State::PENDING)
             {
-                duration dur = clock::now() - pair.second.starttime;
-                if (dur.count() > cmstate.acktimeout_ms)
+                duration dur = clock::now() - pReq->second.starttime;
+                if (dur.count() > cmstate.ack_timeout_ms)
                 {
-                    pair.second.endtime = clock::now();
-                    //SetRequestStatusState(*pConn, pair.first, Connection::RequestStatus::State::FAILED, false);
-                    pair.second.state = Connection::RequestStatus::State::FAILED;
+                    pReq->second.endtime = clock::now();
+                    pReq->second.state = Connection::RequestStatus::State::FAILED;
                     cmstate.onevent(cmstate.oneventcontext,
-                                    ConnManState::OnEventType::ACK_TIMEOUT,
+                                    ConnManState::OnEventType::MESSAGE_ACK_TIMEOUT,
                                     pConn,
-                                    &pair.second.packet);
+                                    &pReq->second.packet);
+                    pReq = pConn->reqstatus.erase(pReq);
                 }
+                else
+                    pReq++;
             }
-            else if (pair.second.state == Connection::RequestStatus::State::SUCCEEDED)
+            else if (pReq->second.state == Connection::RequestStatus::State::SUCCEEDED)
             {
-
+                cmstate.onevent(cmstate.oneventcontext,
+                                ConnManState::OnEventType::MESSAGE_ACK_RECEIVED,
+                                pConn,
+                                &pReq->second.packet);
+                pReq = pConn->reqstatus.erase(pReq);
             }
+            else
+                pReq++;
         }
         pConn->reqstatusmutex.unlock();
-        //
-        // Connection hasn't seen traffic in over 10 seconds
-        // Notify user, and drop Connection
-        //
-
-        //duration hb = clock::now() - c.heartbeat;
-        //if (hb.count() > cmstate.heartbeat_ms)
-        //{
-        //    c.heartbeat = clock::now();
-        //    ConnMan::SendPing(cmstate, c, true);
-        //}
 
         duration d = clock::now() - pConn->lastrxtime;
-        if (d.count() > cmstate.stale_ms)
+        if (d.count() > cmstate.timeout_ms)
         {
+            if (pConn->locality == Connection::Locality::REMOTE)
+            {
+                pConn->state = Connection::State::DEAD;
+            }
+            else
+            {//HACK
+                pConn->state = Connection::State::ALIVE;
+                pConn->lastrxtime = clock::now();
+            }
+
             cmstate.onevent(cmstate.oneventcontext,
-                            ConnManState::OnEventType::CONNECTION_STALE,
+                            ConnManState::OnEventType::CONNECTION_TIMEOUT,
                             pConn,
                             nullptr);
         }
-    }// state != UNINIT
-    cmstate.connectionsmutex.unlock();
-   
+    } // If Alive
+    if (pConn->state == Connection::State::DEAD)
+    {
+    }
+}
+void
+ConnMan::UpdateClient(
+    Connection* pConn
+)
+{
+
+    //cmstate.connectionsmutex.lock();
+
+
+    // Service outgoing reliable packets.
+    //
+    // We are only going to send a packet
+    // if we are not currently waiting for an ack
+    // from last packet. 
+    UpdateAlive(pConn);
+
+    if (pConn->state == Connection::State::IDENTIFYING)
+    {
+        duration d2 = clock::now() - pConn->lasttxtime;
+        if (d2.count() > cmstate.timeout_ms)
+        {
+            pConn->state = Connection::State::DEAD;
+            cmstate.onevent(cmstate.oneventcontext,
+                            ConnManState::OnEventType::CONNECTION_HANDSHAKE_TIMEOUT,
+                            pConn,
+                            nullptr);
+        }
+    }
+
+    if (pConn->state == Connection::State::DENIED)
+    {
+        pConn->state = Connection::State::DEAD;
+        cmstate.onevent(cmstate.oneventcontext,
+                        ConnManState::OnEventType::CONNECTION_HANDSHAKE_DENIED,
+                        pConn,
+                        nullptr);
+    }
+
+
+    //cmstate.connectionsmutex.unlock();
+}
+void
+ConnMan::Update(
+    uint32_t ms_elapsed,
+    bool client
+)
+{
+    Connection* pConn = nullptr;
+    cmstate.timeticks += ms_elapsed;
+    if (!client)
+    {
+        cmstate.connectionsmutex.lock();
+        for (auto& pConn : cmstate.connections)
+        {
+            UpdateServer(&pConn);
+        }
+        ReapConnections();
+    }
+    else
+    {
+        UpdateClient(&cmstate.localconn);
+    }
+
+    if (!client)
+    {
+        cmstate.connectionsmutex.unlock();
+    }
+}
+void
+ConnMan::UpdateServer(
+    Connection* pConn
+)
+{
+    UpdateAlive(pConn);
+    if (pConn->state == Connection::State::GRANTED)
+    {
+        pConn->state = Connection::State::ALIVE;
+        cmstate.onevent(cmstate.oneventcontext,
+            ConnManState::OnEventType::CONNECTION_HANDSHAKE_GRANTED,
+            pConn,
+            nullptr);
+    }
 }
 void
 ConnMan::ProcessGrant(
-    ConnManState& cmstate,
     Connection* pConn,
     Request* request
 )
@@ -412,11 +511,7 @@ ConnMan::ProcessGrant(
     {
         pConn->lastrxtime = clock::now();
         pConn->id = GetConnectionId(request->packet);
-        pConn->state = Connection::State::READY;
-        cmstate.onevent(cmstate.oneventcontext,
-                        ConnManState::OnEventType::GRANTED,
-                        pConn,
-                        &request->packet);
+        pConn->state = Connection::State::GRANTED;
     }
     else
     {
@@ -425,7 +520,6 @@ ConnMan::ProcessGrant(
 }
 void
 ConnMan::ProcessDeny(
-    ConnManState& cmstate,
     Connection* pConn,
     Request* request
 )
@@ -433,10 +527,7 @@ ConnMan::ProcessDeny(
     std::string playername = GetPlayerName(request->packet);
     if (playername == pConn->playername)
     {
-        cmstate.onevent(cmstate.oneventcontext,
-            ConnManState::OnEventType::DENIED,
-            pConn,
-            &request->packet);
+        pConn->state = Connection::State::DENIED;
     }
     else
     {
@@ -446,14 +537,27 @@ ConnMan::ProcessDeny(
 
 void
 ConnMan::ProcessGeneral(
-    ConnManState& cmstate,
     Connection* pConn,
     Request* request
 )
 {
+    std::random_device rd;     // only used once to initialise (seed) engine
+    std::mt19937 rng(rd());    // random-number engine used (Mersenne-Twister in this case)
+    std::uniform_int_distribution<uint32_t> uni(1, 65536); // guaranteed unbiased
+
+    auto random_integer = uni(rng);
+    if (random_integer < 10000)
+    {
+        std::cout << "Simulation: Dropping General Packet" << std::endl;
+        return ;
+    }
+
+
     if (pConn)
     {
+        pConn->rxpacketmutex.lock();
         pConn->rxpackets.push(request->packet);
+        pConn->rxpacketmutex.unlock();
         pConn->lastrxtime = clock::now();
         /*
         On Packet Receive, If packet is reliable, Then send Ack packet unreliably.
@@ -461,7 +565,7 @@ ConnMan::ProcessGeneral(
         MESG* msg = (MESG*)request->packet.buffer;
         if (msg->header.mode == (uint8_t)MESG::HEADER::Mode::Reliable)
         {
-            ConnMan::SendAckTo(cmstate, pConn->who, pConn->id, msg->header.seq);
+            SendAckTo(pConn->who, pConn->id, msg->header.seq);
         }
     }
     else
@@ -472,7 +576,6 @@ ConnMan::ProcessGeneral(
 
 void
 ConnMan::ProcessAck(
-    ConnManState& cmstate,
     Connection* pConn,
     Request* request
 )
@@ -482,19 +585,16 @@ ConnMan::ProcessAck(
         MESG* pMsg = (MESG*)request->packet.buffer;
 
         uint32_t ack = pMsg->header.ack;
-        pConn->reqstatusmutex.lock();
 
-        if (pConn->reqstatus.count(ack) == 1)
+        auto pReq = pConn->GetRequestStatus(ack);
+        //pConn->reqstatusmutex.lock();
+        if (pReq != pConn->reqstatus.end())
         {
-            if (pConn->reqstatus[ack].state == Connection::RequestStatus::State::PENDING)
+            if (pReq->second.state == Connection::RequestStatus::State::PENDING)
             {
                 pConn->lastrxtime = clock::now();
-                pConn->reqstatus[ack].endtime = clock::now();
-                pConn->reqstatus[ack].state = Connection::RequestStatus::State::SUCCEEDED;
-                cmstate.onevent(cmstate.oneventcontext,
-                                ConnManState::OnEventType::ACK_RECEIVED,
-                                pConn,
-                                &pConn->reqstatus[ack].packet);
+                pReq->second.endtime = clock::now();
+                pReq->second.state = Connection::RequestStatus::State::SUCCEEDED;
             }
             else
             {
@@ -511,7 +611,7 @@ ConnMan::ProcessAck(
             //
             std::cout << "Fact: Rx'd Ack for old FAILED request: " << ack << std::endl;
         }
-        pConn->reqstatusmutex.unlock();
+        //pConn->reqstatusmutex.unlock();
     }
     else
     {
@@ -520,23 +620,23 @@ ConnMan::ProcessAck(
 }
 void
 ConnMan::ConnManClientIOHandler(
-    void* cmstate_,
+    void* cm_,
     Request* request,
     uint64_t tid
 )
 {
     bali::Network::Result result(bali::Network::ResultType::SUCCESS);
-    ConnManState& cmstate = *((ConnManState*)cmstate_);
+    ConnMan& cm = *((ConnMan*)cm_);
     std::random_device rd;     // only used once to initialise (seed) engine
     std::mt19937 rng(rd());    // random-number engine used (Mersenne-Twister in this case)
     std::uniform_int_distribution<uint32_t> uni(1, 65536); // guaranteed unbiased
 
     auto random_integer = uni(rng);
-    cmstate.connectionsmutex.lock();
+    cm.cmstate.connectionsmutex.lock();
     if (request->ioType == Request::IOType::READ)
     {
         MESG* m = (MESG*)request->packet.buffer;
-        std::cout << "Client Rx: " << CodeName[m->header.code] << "[" <<m->header.seq << "]" << "[" << m->header.ack << "]" << std::endl;
+        std::cout << "Client Rx: " << CodeName[m->header.code] << "[" << m->header.id << "]" << "[" << m->header.seq << "]" << "[" << m->header.ack << "]" << std::endl;
 
 
         if (IsMagicGood(request->packet))
@@ -551,28 +651,28 @@ ConnMan::ConnManClientIOHandler(
                     // Therefore, we find the associated connection
                     // by name
                     //
-                    Connection* pConn = &cmstate.localconn;
-                    ConnMan::ProcessGrant(cmstate, pConn, request);
+                    Connection* pConn = &cm.cmstate.localconn;
+                    cm.ProcessGrant(pConn, request);
                 }
                 else if (IsCode(request->packet, MESG::HEADER::Codes::Deny))
                 {
-                    Connection* pConn = &cmstate.localconn;
-                    ProcessDeny(cmstate, pConn, request);
+                    Connection* pConn = &cm.cmstate.localconn;
+                    cm.ProcessDeny(pConn, request);
                 }
                 else if (IsCode(request->packet, MESG::HEADER::Codes::Ack))
                 {
                     // Rx'd an ACk. 
                     // Something is eagerly awaiting this i'm sure.
-                    Connection* pConn = &cmstate.localconn;
-                    ConnMan::ProcessAck(cmstate, pConn, request);
+                    Connection* pConn = &cm.cmstate.localconn;
+                    cm.ProcessAck(pConn, request);
                 }
                 else
                 {
                     //
                     // Rx'd something other than Identify, or Ack
                     //
-                    Connection* pConn = &cmstate.localconn;
-                    ConnMan::ProcessGeneral(cmstate, pConn, request);
+                    Connection* pConn = &cm.cmstate.localconn;
+                    cm.ProcessGeneral(pConn, request);
                 }
             }
             else
@@ -586,111 +686,22 @@ ConnMan::ConnManClientIOHandler(
             // Magic MisMatch
             std::cout << "Client Rx Packet with incoherent Magic." << std::endl;
         }
-        Network::read(cmstate.netstate);
+        Network::read(cm.cmstate.netstate);
     }
     else if (request->ioType == Request::IOType::WRITE)
     {
         MESG* m = (MESG*)request->packet.buffer;
-        std::cout << "Client Tx: " << CodeName[m->header.code] << "[" << m->header.seq << "]" << "[" << m->header.ack << "]" << std::endl;
+        std::cout << "Client Tx: " << CodeName[m->header.code] << "[" << m->header.id << "]" << "[" << m->header.seq << "]" << "[" << m->header.ack << "]" << std::endl;
     }
-    cmstate.connectionsmutex.unlock();
+    cm.cmstate.connectionsmutex.unlock();
 }
 
-void
-ConnMan::UpdateServer(
-    ConnManState & cmstate,
-    uint32_t ms_elapsed
-)
-{
-
-    cmstate.timeticks += ms_elapsed;
-    cmstate.connectionsmutex.lock();
-
-    //
-    // Update the connection states, and raise interesting facts.
-    //
-    auto pConn = cmstate.connections.begin();
-    while (pConn != cmstate.connections.end())
-    {
-        //
-        // Service incoming packets
-        //
-        while (!pConn->rxpackets.empty())
-        {
-            Packet packet;
-            packet = pConn->rxpackets.front();
-            pConn->rxpackets.pop();
-            cmstate.onevent(cmstate.oneventcontext,
-                            ConnManState::OnEventType::MESSAGE,
-                            &(*pConn),
-                            &packet);
-        }
-
-        pConn->reqstatusmutex.lock();
-        for (auto & pair : pConn->reqstatus)
-        {
-            if (pair.second.state == Connection::RequestStatus::State::PENDING)
-            {
-                duration dur = clock::now() - pair.second.starttime;
-                if (dur.count() > cmstate.acktimeout_ms)
-                {
-                    //SetRequestStatusState(*pConn, pair.first, Connection::RequestStatus::State::FAILED, false);
-                    pair.second.state = Connection::RequestStatus::State::FAILED;
-                    cmstate.onevent(cmstate.oneventcontext,
-                                    ConnManState::OnEventType::ACK_TIMEOUT,
-                                    &(*pConn),
-                                    &pair.second.packet);
-                }
-            }
-            else if (pair.second.state == Connection::RequestStatus::State::SUCCEEDED)
-            {
-
-            }
-        }
-        pConn->reqstatusmutex.unlock();
-
-        //// Server sent pings to client occasionally.
-        ////
-        //duration hb = clock::now() - pConn->heartbeat;
-        //if (hb.count() > cmstate.heartbeat_ms)
-        //{
-        //    pConn->heartbeat = clock::now();
-        //    ConnMan::SendPing(cmstate, *pConn, true);
-        //}
-
-        //
-        // We need to drop connections that we haven't heard from in a while
-        //
-        duration d = clock::now() - pConn->lastrxtime;
-        if (d.count() > cmstate.stale_ms)
-        {
-            cmstate.onevent(cmstate.oneventcontext,
-                            ConnManState::OnEventType::CONNECTION_STALE,
-                            &(*pConn),
-                            nullptr);
-        }
-
-        if (d.count() > cmstate.remove_ms)
-        {
-            cmstate.onevent(cmstate.oneventcontext,
-                            ConnManState::OnEventType::CONNECTION_REMOVE,
-                            &(*pConn),
-                            nullptr);
-            pConn = cmstate.connections.erase(pConn);
-            break;// continue;
-        }
-        pConn++;
-
-    }
-    cmstate.connectionsmutex.unlock();
-}
 void
 ConnMan::ProcessIdentify(
-    ConnManState& cmstate,
     Request* request
 )
 {
-    if (cmstate.connections.size() < cmstate.numplayers)
+    //if (cmstate.connections.size() < cmstate.numplayers)
     {
         if (cmstate.gamename == GetGameName(request->packet))
         {
@@ -701,9 +712,33 @@ ConnMan::ProcessIdentify(
                 std::uniform_int_distribution<uint32_t> uni(1, 65536); // guaranteed unbiased
 
                 auto random_integer = uni(rng);
+                // DEBUG
+                if (random_integer > 20000 && random_integer < 30000)
+                {
+                    std::cout << "Simulation: Dropping Identify Packet" << std::endl;
+                    return;
+                }
+                if (random_integer > 30000 && random_integer < 40000)
+                {
+                    std::cout << "Simulation: Sending Deny Packet" << std::endl;
+                    SendDenyTo(request->packet.address,
+                                GetPlayerName(request->packet));
+                    return;
+                }
 
                 std::string pn = GetPlayerName(request->packet);
-                if (ConnMan::IsPlayerNameAvailable(cmstate.connections, pn))
+                uint16_t id = GetConnectionId(request->packet);
+                Connection* pConn = nullptr;
+
+                cmstate.connectionsmutex.lock();
+                bool isnameavail = ConnMan::IsPlayerNameAndIdAvailable(cmstate.connections, pn, id);
+                if (!isnameavail)
+                {
+                    pConn = GetConnectionById(cmstate.connections, id);
+                }
+                cmstate.connectionsmutex.unlock();
+
+                if (isnameavail)
                 {
                     //
                     // Grant
@@ -715,64 +750,75 @@ ConnMan::ProcessIdentify(
                                          request->packet.address,
                                          pn);
                     connection.playername = pn;
-                    connection.id = random_integer;
+                    connection.id = id;
                     connection.who = request->packet.address;
-                    connection.state = Connection::State::READY;
+                    connection.lastrxtime = clock::now();
+                    connection.lasttxtime = clock::now();
+                    connection.locality = Connection::Locality::REMOTE;
+                    connection.state = Connection::State::GRANTED;
 
+                    cmstate.connectionsmutex.lock();
                     cmstate.connections.push_back(connection);
-                    cmstate.onevent(cmstate.oneventcontext,
-                                    ConnManState::OnEventType::CONNECTION_ADD,
-                                    &connection,
-                                    &request->packet);
+                    cmstate.connectionsmutex.unlock();
 
-                    ConnMan::SendGrantTo(cmstate,
-                                         connection.who,
-                                         connection.id,
-                                         connection.playername);
+                    SendGrantTo(connection.who,
+                                connection.id,
+                                connection.playername);
+                    
+
                 }
                 else
                 {
-                    // Deny - player name already exists
-                    ConnMan::SendDenyTo(cmstate,
-                                        request->packet.address,
-                                        GetPlayerName(request->packet));
-                    std::cout << "Tx Deny: Player Name already exists\n";
+                    SendGrantTo(pConn->who,
+                                pConn->id,
+                                pConn->playername);
                 }
+                //else
+                //{
+                //    // Deny - player name already exists
+                //    SendDenyTo(request->packet.address,
+                //               GetPlayerName(request->packet));
+                //    std::cout << "Tx Deny: Player Name already exists\n";
+                //}
             }
             else
             {
                 // Deny - password doesn't match
-                ConnMan::SendDenyTo(cmstate,
-                                    request->packet.address,
-                                    GetPlayerName(request->packet));
+                SendDenyTo(request->packet.address,
+                           GetPlayerName(request->packet));
                 std::cout << "Tx Deny: Password is bad\n";
             }
         }
         else
         {
             // Deny - Game name doesn't match
-            ConnMan::SendDenyTo(cmstate,
-                                request->packet.address,
-                                GetPlayerName(request->packet));
+            SendDenyTo(request->packet.address,
+                       GetPlayerName(request->packet));
             std::cout << "Tx Deny: Game name is unknown\n";
         }
     }
 }
 void
 ConnMan::ConnManServerIOHandler(
-    void* cmstate_,
+    void* cm_,
     Request* request,
     uint64_t tid
 )
 {
     bali::Network::Result result(bali::Network::ResultType::SUCCESS);
-    ConnManState& cmstate = *((ConnManState*)cmstate_);
+    ConnMan& cm = *((ConnMan*)cm_);
 
-    cmstate.connectionsmutex.lock();
+    std::random_device rd;     // only used once to initialise (seed) engine
+    std::mt19937 rng(rd());    // random-number engine used (Mersenne-Twister in this case)
+    std::uniform_int_distribution<uint32_t> uni(1, 65536); // guaranteed unbiased
+
+    auto random_integer = uni(rng);
+
+    
     if (request->ioType == Request::IOType::READ)
     {
         MESG* m = (MESG*)request->packet.buffer;
-        std::cout << "Server Rx: " << CodeName[m->header.code] << "[" << m->header.seq << "]" << "[" << m->header.ack << "]" << std::endl;
+        std::cout << "Server Rx: " << CodeName[m->header.code] << "[" << m->header.id << "]" << "[" << m->header.seq << "]" << "[" << m->header.ack << "]" << std::endl;
 
         /*
             If we recieve an Identify packet,
@@ -794,15 +840,17 @@ ConnMan::ConnManServerIOHandler(
                     // Therefore, an ID hasn't been
                     // generated yet - "Connection" not
                     // established.
-                    ConnMan::ProcessIdentify(cmstate, request);
+                    cm.ProcessIdentify(request);
                 }
                 else if (IsCode(request->packet, MESG::HEADER::Codes::Ack))
                 {
                     // Rx'd an ACk. 
                     // Something is eagerly awaiting this i'm sure.
                     uint32_t cid = GetConnectionId(request->packet);
-                    Connection* pConn = ConnMan::GetConnectionById(cmstate.connections, cid);
-                    ConnMan::ProcessAck(cmstate, pConn, request);
+                    cm.cmstate.connectionsmutex.lock();
+                    Connection* pConn = ConnMan::GetConnectionById(cm.cmstate.connections, cid);
+                    cm.cmstate.connectionsmutex.unlock();
+                    cm.ProcessAck(pConn, request);
                 }
                 else
                 {
@@ -812,8 +860,10 @@ ConnMan::ConnManServerIOHandler(
                     Connection* pConn;
                     uint32_t cid;
                     cid = GetConnectionId(request->packet);
-                    pConn = ConnMan::GetConnectionById(cmstate.connections, cid);
-                    ConnMan::ProcessGeneral(cmstate, pConn, request);
+                    cm.cmstate.connectionsmutex.lock();
+                    pConn = ConnMan::GetConnectionById(cm.cmstate.connections, cid);
+                    cm.cmstate.connectionsmutex.unlock();
+                    cm.ProcessGeneral(pConn, request);
                 }
             }
             else
@@ -830,15 +880,15 @@ ConnMan::ConnManServerIOHandler(
 
         // Prepare read to perpetuate.
         // TODO: what happens when no more free requests?
-        Network::read(cmstate.netstate);
+        Network::read(cm.cmstate.netstate);
     }
     else if (request->ioType == Request::IOType::WRITE)
     {
         MESG* m = (MESG*)request->packet.buffer;
-        std::cout << "Server Tx: " << CodeName[m->header.code] << "[" << m->header.seq << "]" << "[" << m->header.ack << "]" << std::endl;
+        std::cout << "Server Tx: " << CodeName[m->header.code] << "[" << m->header.id << "]" << "[" << m->header.seq << "]" << "[" << m->header.ack << "]" << std::endl;
     }
 
-    cmstate.connectionsmutex.unlock();
+    //cm.cmstate.connectionsmutex.unlock();
 
     return;
 }
@@ -950,15 +1000,16 @@ ConnMan::RemoveConnectionByName(
 }
 
 bool
-ConnMan::IsPlayerNameAvailable(
+ConnMan::IsPlayerNameAndIdAvailable(
     std::list<Connection> & connections,
-    std::string name
+    std::string name,
+    uint16_t id
 )
 {
     bool available = true;
     for (auto c : connections)
     {
-        if (c.playername == name)
+        if (c.playername == name && c.id == id)
         {
             available = false;
             break;
@@ -1124,6 +1175,18 @@ GetRequestStatus(
     connection.reqstatusmutex.lock();
     auto iter = connection.reqstatus.find(index);
     connection.reqstatusmutex.unlock();
+
+    return iter;
+}
+
+std::map<uint32_t, Connection::RequestStatus>::iterator
+Connection::GetRequestStatus(
+    uint32_t index
+)
+{
+    reqstatusmutex.lock();
+    auto iter = reqstatus.find(index);
+    reqstatusmutex.unlock();
 
     return iter;
 }

@@ -113,10 +113,19 @@ public:
         REMOTE,
         LOCAL
     };
+
     enum class State {
-        NEW,
-        READY
+        DEAD,
+        GRANTED,
+        DENIED,
+        ALIVE,
+        IDENTIFYING
     };
+
+    std::map<uint32_t, RequestStatus>::iterator
+    GetRequestStatus(
+        uint32_t index
+    );
 
     std::string         playername;
     State               state;
@@ -134,7 +143,7 @@ public:
     Locality            locality;   // TODO: was thinking this could
                                     // be used to merge client and server code
                                     // in a sane manner.
-
+    clock::time_point   identtime;
     clock::time_point   lastrxtime;
     clock::time_point   lasttxtime;
 
@@ -149,6 +158,8 @@ public:
 
     Mutex               reqstatusmutex;
     std::map<uint32_t, RequestStatus> reqstatus;
+
+    Mutex               rxpacketmutex;
     std::queue<Packet>  rxpackets;
 };
 
@@ -189,22 +200,23 @@ InitializeConnection(
 struct ConnManState
 {
     enum class OnEventType {
-        CONNECTION_ADD,    // Server Side Event
-        CONNECTION_REMOVE, // Server Side Event
-        ACK_TIMEOUT,
-        ACK_RECEIVED,
-        GRANTED,     // Client Side Event
-        DENIED,      // Client Side Event
-        MESSAGE,
-        CONNECTION_STALE
+        CONNECTION_HANDSHAKE_GRANTED,    // Server Side Event
+        CONNECTION_HANDSHAKE_DENIED,
+        CONNECTION_HANDSHAKE_TIMEOUT,
+        CONNECTION_TIMEOUT_WARNING,
+        CONNECTION_TIMEOUT,
+        MESSAGE_ACK_TIMEOUT,
+        MESSAGE_ACK_RECEIVED,
+        MESSAGE_RECEIVED
     };
     typedef void(*OnEvent)(void* oecontext, OnEventType t, Connection* conn, Packet* packet);
 
     uint64_t                timeticks;
     uint32_t                done;
 
-    std::string             ipv4server;
-    uint32_t                port;
+    uint32_t                thisport;
+    std::string             serveripv4;
+    uint32_t                serverport;
 
     uint32_t                numplayers;
     uint32_t                numreadyplayers;
@@ -212,10 +224,10 @@ struct ConnManState
     std::string             gamename;
     std::string             gamepass;
 
-    uint32_t                heartbeat_ms;
-    uint32_t                stale_ms;
-    uint32_t                remove_ms;
-    uint32_t                acktimeout_ms;
+    uint32_t                heart_beat_ms;
+    uint32_t                timeout_warning_ms;
+    uint32_t                timeout_ms;
+    uint32_t                ack_timeout_ms;
 
     NetworkState            netstate;
     Mutex                   connectionsmutex;
@@ -246,17 +258,14 @@ for knowing if an origin is known or unknown.
 */
 class ConnMan
 {
-private:
-    ConnMan(){}
 public:
+    ConnMan(){}
     ~ConnMan(){}
 
-    static
     void
     InitializeServer(
-        ConnManState & cmstate,
         NetworkConfig & netcfg,
-        uint32_t port,
+        uint32_t thisport,
         uint32_t numplayers,
         std::string gamename,
         std::string gamepass,
@@ -264,37 +273,60 @@ public:
         void* oneventcontext
     );
 
-    static
     void
     InitializeClient(
-        ConnManState & cmstate,
         NetworkConfig & netcfg,
-        std::string ipv4,
-        uint32_t port,
+        uint32_t thisport,
+        uint32_t numplayers,
         std::string gamename,
         std::string gamepass,
         ConnManState::OnEvent onevent,
         void* oneventcontext
     );
 
-    static
     void
     UpdateServer(
-        ConnManState & cmstate,
-        uint32_t ms_elapsed
+        Connection* pConn
     );
 
-    static
     void
     UpdateClient(
-        ConnManState & cmstate,
-        uint32_t ms_elapsed
+        Connection* pConn
+    );
+    void
+    UpdateAlive(
+        Connection* pConn
+    );
+    void
+    ReapConnections(
+
+    )
+    {
+        // Reap Dead Connections
+        //
+        auto pConn = cmstate.connections.begin();
+        while (pConn != cmstate.connections.end())
+        {
+            if (pConn->state == Connection::State::DEAD)
+            {
+                pConn = cmstate.connections.erase(pConn);
+            }
+            else
+            {
+                pConn++;
+            }
+        }
+    }
+
+    void
+    Update(
+        uint32_t ms_elapsed,
+        bool client
     );
 
-    static
+
     void
     Cleanup(
-        ConnManState & cmstate
     );
 
     typedef void (*AcknowledgeHandler)(uint32_t code);
@@ -310,29 +342,23 @@ public:
         GET_PING
     };
 
-    static
     uint32_t
     SendReliable(
-        ConnManState & cmstate,
         Connection & connection,
         uint8_t* buffer,
         uint32_t buffersize,
         AcknowledgeHandler ackhandler
     );
 
-    static
     void
     SendUnreliable(
-        ConnManState & cmstate,
         Connection & connection,
         uint8_t* buffer,
         uint32_t buffersize
     );
 
-    static
     void
     SendAckTo(
-        ConnManState & cmstate,
         Address to,
         uint32_t id,
         uint32_t ack
@@ -370,83 +396,68 @@ public:
 
     static
     bool
-    IsPlayerNameAvailable(
+        IsPlayerNameAndIdAvailable(
         std::list<Connection> & connections,
-        std::string name
+        std::string name,
+        uint16_t id
     );
 
-    static
+
     uint64_t
     ReadyCount(
-        ConnManState & cmstate
     );
 
-    static
     uint64_t
-    Connect(
-        ConnManState & cmstate,
+    SendIdentify(
         Connection& connection,
+        uint32_t randomcode,
         std::string gamename,
         std::string gamepass
     );
 
-    static
     uint64_t
     SendGrantTo(
-        ConnManState & cmstate,
         Address to,
         uint32_t id,
         std::string playername
     );
 
-    static
     uint64_t
     SendDenyTo(
-        ConnManState & cmstate,
         Address to,
         std::string playername
     );
 
-    static
     void
     ProcessIdentify(
-        ConnManState& cmstate,
         Request* request
     );
 
-    static
     void
     ProcessGeneral(
-        ConnManState& cmstate,
         Connection* pConn,
         Request* request
     );
 
-    static
     void
     ProcessAck(
-        ConnManState& cmstate,
         Connection* pConn,
         Request* request
     );
 
-    static
     void
     ProcessDeny(
-        ConnManState& cmstate,
         Connection* pConn,
         Request* request
     );
 
-    static
     void
     ProcessGrant(
-        ConnManState& cmstate,
         Connection* pConn,
         Request* request
     );
 
-
+    ConnManState cmstate;
 };
 
 void

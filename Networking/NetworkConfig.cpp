@@ -12,10 +12,10 @@ LoadNetworkConfig(
     ConfigMap map = LoadConfig(filename);
 
     // Set from config file
-    c.HEARTBEAT_MS = std::stoul(map["HEARTBEAT_MS"]);
-    c.STALE_MS= std::stoul(map["STALE_MS"]);
-    c.REMOVE_MS= std::stoul(map["REMOVE_MS"]);
-    c.ACKTIMEOUT_MS= std::stoul(map["ACKTIMEOUT_MS"]);
+    c.HEART_BEAT_MS = std::stoul(map["HEART_BEAT_MS"]);
+    c.TIMEOUT_WARNING_MS= std::stoul(map["TIMEOUT_WARNING_MS"]);
+    c.TIMEOUT_MS= std::stoul(map["TIMEOUT_MS"]);
+    c.ACK_TIMEOUT_MS= std::stoul(map["ACK_TIMEOUT_MS"]);
 
     return c;
 }

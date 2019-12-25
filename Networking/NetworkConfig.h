@@ -8,10 +8,10 @@ namespace bali
 
 struct NetworkConfig
 {
-    uint32_t HEARTBEAT_MS;
-    uint32_t STALE_MS;
-    uint32_t REMOVE_MS;
-    uint32_t ACKTIMEOUT_MS;
+    uint32_t HEART_BEAT_MS;
+    uint32_t TIMEOUT_WARNING_MS;
+    uint32_t TIMEOUT_MS;
+    uint32_t ACK_TIMEOUT_MS;
 };
 
 NetworkConfig

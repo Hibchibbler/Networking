@@ -182,6 +182,10 @@ Network::Result Network::bindSocket(NetworkState& netstate)
     Network::Result result(Network::ResultType::SUCCESS);
     Network::GetLocalAddressInfo(netstate, netstate.socket);
 
+    //((sockaddr_in*)&netstate.socket.local.addr)->sin_family = AF_INET;
+    //((sockaddr_in*)&netstate.socket.local.addr)->sin_addr.S_un.S_addr = inet_addr("10.0.0.93");
+    ((sockaddr_in*)&netstate.socket.local.addr)->sin_port = htons(netstate.port);
+
     int ret = bind(netstate.socket.handle, (SOCKADDR*)&netstate.socket.local.addr, sizeof(netstate.socket.local.addr));
     if (ret == SOCKET_ERROR)
     {
