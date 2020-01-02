@@ -117,7 +117,26 @@ class Packet
         {
             *this = packet;
         }
+        Packet(Packet && packet)
+        {
+            memcpy(buffer, packet.buffer, MAX_PACKET_SIZE);
+            ackhandler = packet.ackhandler;
+            buffersize = packet.buffersize;
+            address = packet.address;
+        }
         Packet & operator=(const Packet & packet)
+        {
+            if (this != &packet)
+            {
+                memcpy(buffer, packet.buffer, MAX_PACKET_SIZE);
+                ackhandler = packet.ackhandler;
+                buffersize = packet.buffersize;
+                address = packet.address;
+            }
+            return *this;
+        }
+
+        Packet & operator=(Packet && packet)
         {
             if (this != &packet)
             {

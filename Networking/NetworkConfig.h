@@ -12,6 +12,7 @@ struct NetworkConfig
     uint32_t TIMEOUT_WARNING_MS;
     uint32_t TIMEOUT_MS;
     uint32_t ACK_TIMEOUT_MS;
+    uint32_t RETRY_COUNT;
 };
 
 NetworkConfig

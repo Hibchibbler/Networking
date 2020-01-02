@@ -16,7 +16,7 @@ LoadNetworkConfig(
     c.TIMEOUT_WARNING_MS= std::stoul(map["TIMEOUT_WARNING_MS"]);
     c.TIMEOUT_MS= std::stoul(map["TIMEOUT_MS"]);
     c.ACK_TIMEOUT_MS= std::stoul(map["ACK_TIMEOUT_MS"]);
-
+    c.RETRY_COUNT = std::stoul(map["RETRY_COUNT"]);
     return c;
 }
 

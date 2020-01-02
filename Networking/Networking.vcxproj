@@ -155,6 +155,7 @@
     <ClInclude Include="CommMan.h" />
     <ClInclude Include="ConfigLoader.h" />
     <ClInclude Include="ConnMan.h" />
+    <ClInclude Include="ConnManUtils.h" />
     <ClInclude Include="Network.h" />
     <ClInclude Include="NetworkConfig.h" />
     <ClInclude Include="SlabPool.h" />
@@ -164,6 +165,7 @@
     <ClCompile Include="CommMan.cpp" />
     <ClCompile Include="ConfigLoader.cpp" />
     <ClCompile Include="ConnMan.cpp" />
+    <ClCompile Include="ConnManUtils.cpp" />
     <ClCompile Include="Network.cpp" />
     <ClCompile Include="NetworkConfig.cpp" />
   </ItemGroup>

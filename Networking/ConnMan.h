@@ -11,121 +11,90 @@
 #include <list>
 #include <map>
 #include <chrono>
-
+#include <future>
+#include <memory>
+using std::move;
 namespace bali
 {
 typedef std::chrono::high_resolution_clock clock;
 typedef std::chrono::duration<float, std::milli> duration;
-
-struct IDENTIFY
+struct RequestStatus
 {
-    CHAR playername[16];
-    CHAR gamename[16];
-    CHAR gamepass[16];
-};
+    enum class RequestResult {
+        ACKNOWLEDGED,
+        TIMEDOUT
+    };
+    enum class State {
+        PENDING,
+        FAILED,
+        SUCCEEDED,
+        DYING,
+        DEAD
+    };
 
-struct GRANT
-{
-    CHAR playername[16];
-};
+    //enum class SendStyle {
+    //    AUTO_REMOVE_REQUEST,
+    //    MANUAL_REMOVE_REQUEST
+    //};
 
-struct DENY
-{
-    CHAR playername[16];
-};
-
-struct GENERAL
-{
-    uint8_t buffer[MAX_PACKET_SIZE-128];
-};
-
-struct ACK
-{
-};
-
-struct PINGPONG
-{
-
-};
-
-
-struct MESG
-{
-    struct HEADER
+    RequestStatus()
     {
-        enum class Codes {
-            Identify,
-            Grant,
-            Deny,
-            General,
-            Ack
-        };
+        promise = std::make_shared<std::promise<RequestResult>>();
+        retries = 0;
+    }
 
-        enum class Mode {
-            Reliable,
-            Unreliable
-        };
-        uint8_t magic[2];
-        uint8_t code;
-        uint8_t mode;
-        uint16_t id;
-        uint32_t seq;
-        uint32_t ack;
+    ~RequestStatus()
+    {
 
-    }header;
+    }
 
-    union {
-        IDENTIFY    identify;   // Client Rx
-        GRANT       grant;      // Server Rx
-        DENY        deny;       // Server Rx
-        GENERAL     general;    // Client Rx & Server Rx
-        ACK         ack;
-    }payload;
+
+    uint32_t retries;
+    clock::time_point starttime;
+    clock::time_point endtime;
+    std::shared_ptr<std::promise<RequestResult>> promise;
+    uint32_t seq;
+    State    state;
+    Packet   packet;
 };
 
-static const char* CodeName[] = {
-    "Identify",
-    "Grant",
-    "Deny",
-    "General",
-    "Ack"
-};
+
+typedef std::promise<RequestStatus::RequestResult> RequestPromise;
+typedef std::future<RequestStatus::RequestResult> RequestFuture;
+
+
 
 class Connection
 {
 public:
-
-    struct RequestStatus
-    {
-        enum class State {
-            PENDING,
-            FAILED,
-            SUCCEEDED
-        };
-        clock::time_point starttime;
-        clock::time_point endtime;
-
-        uint32_t seq;
-        State    state;
-        Packet   packet;
-    };
     enum class Locality {
         REMOTE,
         LOCAL
     };
 
+    enum class ConnectingResult {
+        GRANTED,
+        DENIED,
+        TIMEDOUT
+    };
+
     enum class State {
         DEAD,
+        DYING,
         GRANTED,
         DENIED,
         ALIVE,
         IDENTIFYING
     };
 
+    //Connection()
+    //    : cmpromise(std::make_shared<std::promise<ConnectionStatus>>())
+    //    {}
+
     std::map<uint32_t, RequestStatus>::iterator
-    GetRequestStatus(
-        uint32_t index
-    );
+        GetRequestStatus(
+            uint32_t index
+        );
 
     std::string         playername;
     State               state;
@@ -151,8 +120,11 @@ public:
     clock::time_point   pingstart;
     clock::time_point   pingend;
 
-    std::list<duration> pingtimes;
+    std::list<uint32_t> pingtimes;
     float               avgping;
+    uint32_t            curping;
+    uint32_t            minping;
+    uint32_t            maxping;
 
     clock::time_point   acktime;
 
@@ -161,44 +133,21 @@ public:
 
     Mutex               rxpacketmutex;
     std::queue<Packet>  rxpackets;
+
+
+    std::shared_ptr<std::promise<ConnectingResult>> connectingresultpromise;
 };
 
-void
-SetRequestStatusState(
-    Connection & connection,
-    uint32_t sid,
-    Connection::RequestStatus::State state,
-    bool lock
-);
+typedef std::promise<Connection::ConnectingResult> ConnectingResultPromise;
+typedef std::future<Connection::ConnectingResult> ConnectingResultFuture;
 
-void
-AddRequestStatus(
-    Connection & connection,
-    Connection::RequestStatus & rs,
-    uint32_t seq
-);
-
-std::map<uint32_t, Connection::RequestStatus>::iterator
-GetRequestStatus(
-    Connection & connection,
-    uint32_t index
-);
-
-void
-RemoveRequestStatus(
-    Connection & connection,
-    uint32_t sid
-);
-
-void
-InitializeConnection(
-    Connection* pConn,
-    Address to,
-    std::string playername
-);
 
 struct ConnManState
 {
+    enum class ConnManType {
+        CLIENT,
+        SERVER
+    };
     enum class OnEventType {
         CONNECTION_HANDSHAKE_GRANTED,    // Server Side Event
         CONNECTION_HANDSHAKE_DENIED,
@@ -210,7 +159,7 @@ struct ConnManState
         MESSAGE_RECEIVED
     };
     typedef void(*OnEvent)(void* oecontext, OnEventType t, Connection* conn, Packet* packet);
-
+    ConnManType             cmtype;
     uint64_t                timeticks;
     uint32_t                done;
 
@@ -228,21 +177,12 @@ struct ConnManState
     uint32_t                timeout_warning_ms;
     uint32_t                timeout_ms;
     uint32_t                ack_timeout_ms;
+    uint32_t                retry_count;
 
     NetworkState            netstate;
     Mutex                   connectionsmutex;
     std::list<Connection>   connections;
     Connection              localconn;
-
-    //std::queue<Packet>      rxpackets;
-    //std::queue<Packet>      txpacketsunreliable;
-
-    struct RequestState
-    {
-        uint32_t id;
-        uint32_t state;
-    };
-    SlabPool<RequestState>  slabpool;
 
     OnEvent                 onevent;
     void*                   oneventcontext;
@@ -259,12 +199,20 @@ for knowing if an origin is known or unknown.
 class ConnMan
 {
 public:
+    typedef void (*AcknowledgeHandler)(uint32_t code);
+
+    enum class SendType
+    {
+        WITHOUTRECEIPT,
+        WITHRECEIPT
+    };
     ConnMan(){}
     ~ConnMan(){}
 
     void
-    InitializeServer(
+    Initialize(
         NetworkConfig & netcfg,
+        ConnManState::ConnManType cmtype,
         uint32_t thisport,
         uint32_t numplayers,
         std::string gamename,
@@ -274,54 +222,26 @@ public:
     );
 
     void
-    InitializeClient(
-        NetworkConfig & netcfg,
-        uint32_t thisport,
-        uint32_t numplayers,
-        std::string gamename,
-        std::string gamepass,
-        ConnManState::OnEvent onevent,
-        void* oneventcontext
-    );
-
-    void
-    UpdateServer(
+    UpdateServerConnections(
         Connection* pConn
     );
 
     void
-    UpdateClient(
+    UpdateClientConnection(
         Connection* pConn
     );
     void
-    UpdateAlive(
+    UpdateConnection(
         Connection* pConn
     );
-    void
-    ReapConnections(
 
-    )
-    {
-        // Reap Dead Connections
-        //
-        auto pConn = cmstate.connections.begin();
-        while (pConn != cmstate.connections.end())
-        {
-            if (pConn->state == Connection::State::DEAD)
-            {
-                pConn = cmstate.connections.erase(pConn);
-            }
-            else
-            {
-                pConn++;
-            }
-        }
-    }
+    void
+    ReapDeadConnections(
+    );
 
     void
     Update(
-        uint32_t ms_elapsed,
-        bool client
+        uint32_t ms_elapsed
     );
 
 
@@ -329,32 +249,21 @@ public:
     Cleanup(
     );
 
-    typedef void (*AcknowledgeHandler)(uint32_t code);
+    RequestFuture
+    SendBuffer(
+        Connection & connection,
+        SendType sendType,
+        uint8_t* buffer,
+        uint32_t buffersize,
+        uint32_t& token
+    );
 
-    enum class QueryPredicate
-    {
-        IS_EQUAL
-    };
-
-    enum class QueryType
-    {
-        IS_STATE_EQUAL,
-        GET_PING
-    };
-
-    uint32_t
-    SendReliable(
+    bool
+    SendTryReliable(
         Connection & connection,
         uint8_t* buffer,
         uint32_t buffersize,
-        AcknowledgeHandler ackhandler
-    );
-
-    void
-    SendUnreliable(
-        Connection & connection,
-        uint8_t* buffer,
-        uint32_t buffersize
+        uint32_t& request_index
     );
 
     void
@@ -362,6 +271,89 @@ public:
         Address to,
         uint32_t id,
         uint32_t ack
+    );
+
+    //RequestFuture
+    void
+    SendPingTo(
+        Connection & connection//,
+        //uint32_t & request_index
+    );
+
+    void
+    SendPongTo(
+        Connection & connection,
+        uint32_t ack
+    );
+
+    uint64_t
+    SendIdentify(
+        Connection& connection,
+        uint32_t randomcode,
+        std::string gamename,
+        std::string gamepass
+    );
+
+    Connection::ConnectingResult
+    Connect(
+        Connection& connection,
+        uint32_t randomcode,
+        std::string gamename,
+        std::string gamepass
+    );
+
+    uint64_t
+    SendGrantTo(
+        Address to,
+        uint32_t id,
+        std::string playername
+    );
+
+        void
+    ProcessIdentify(
+        Request* request
+    );
+
+    void
+    ProcessGeneral(
+        Connection* pConn,
+        Request* request
+    );
+
+    void
+    ProcessAck(
+        Connection* pConn,
+        Request* request
+    );
+
+    void
+    ProcessDeny(
+        Connection* pConn,
+        Request* request
+    );
+
+    void
+    ProcessGrant(
+        Connection* pConn,
+        Request* request
+    );
+
+    void
+    ProcessPing(
+        Connection* pConn,
+        Request* request
+    );
+
+    void
+    ProcessPong(
+        Connection* pConn,
+        Request* request
+    );
+
+    uint64_t
+    SendDenyTo(
+        Address to,
+        std::string playername
     );
 
     static
@@ -402,132 +394,23 @@ public:
         uint16_t id
     );
 
-
     uint64_t
     ReadyCount(
     );
 
-    uint64_t
-    SendIdentify(
-        Connection& connection,
-        uint32_t randomcode,
-        std::string gamename,
-        std::string gamepass
-    );
-
-    uint64_t
-    SendGrantTo(
-        Address to,
-        uint32_t id,
-        std::string playername
-    );
-
-    uint64_t
-    SendDenyTo(
-        Address to,
-        std::string playername
+    void
+    KillDyingRequests(
+        Connection* pConn
     );
 
     void
-    ProcessIdentify(
-        Request* request
-    );
-
-    void
-    ProcessGeneral(
-        Connection* pConn,
-        Request* request
-    );
-
-    void
-    ProcessAck(
-        Connection* pConn,
-        Request* request
-    );
-
-    void
-    ProcessDeny(
-        Connection* pConn,
-        Request* request
-    );
-
-    void
-    ProcessGrant(
-        Connection* pConn,
-        Request* request
+    ReapDeadRequests(
+        Connection* pConn
     );
 
     ConnManState cmstate;
 };
 
-void
-AddMagic(
-    MESG* pMsg
-);
-
-uint32_t
-SizeofPayload(
-    MESG::HEADER::Codes code
-);
-
-bool
-IsCode(
-    Packet & packet,
-    MESG::HEADER::Codes code
-);
-
-bool
-IsMagicGood(
-    Packet & packet
-);
-
-bool
-IsSizeValid(
-    Packet & packet
-);
-
-std::string
-GetPlayerName(
-    Packet & packet
-);
-
-uint32_t
-GetConnectionId(
-    Packet & packet
-);
-
-std::string
-GetGameName(
-    Packet & packet
-);
-
-std::string
-GetGamePass(
-    Packet & packet
-);
-
-uint32_t
-GetPacketSequence(
-    Packet & packet
-);
-
-void
-PrintMsgHeader(
-    Packet & packet,
-    bool rx
-);
-
-void
-PrintfMsg(
-    char* format,
-    ...
-);
-
-Address
-CreateAddress(
-    uint32_t port,
-    const char* szIpv4
-);
 
 }
 
