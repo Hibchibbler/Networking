@@ -158,6 +158,8 @@ ConnMan::SendTryReliable(
         }
     } while (waiting);
 
+    RemoveRequestStatus(connection, request_index);
+
     return sent;
 }
 
@@ -249,7 +251,7 @@ ConnMan::SendIdentify(
     AddMagic(pMsg);
     pMsg->header.code = (uint8_t)MESG::HEADER::Codes::Identify;
     pMsg->header.id = randomcode;
-    pMsg->header.seq = 7;
+    pMsg->header.seq = InterlockedIncrement(&connection.curuseq);
 
     memcpy(pMsg->payload.identify.playername,
            connection.playername.c_str(),
@@ -288,7 +290,8 @@ ConnMan::SendPongTo(
     pMsg->header.mode = (uint8_t)MESG::HEADER::Mode::Unreliable;
     pMsg->header.code = (uint8_t)MESG::HEADER::Codes::Pong;
     pMsg->header.id = connection.id;
-    pMsg->header.seq = ack;
+    pMsg->header.seq = InterlockedIncrement(&connection.curuseq); 
+    pMsg->header.ack = ack;
 
     Network::write(cmstate.netstate, packet);
     return;
@@ -384,21 +387,20 @@ ConnMan::SendDenyTo(
 
 void
 ConnMan::SendAckTo(
-    Address to,
-    uint32_t id,
+    Connection & connection,
     uint32_t ack
 )
 {
     Packet packet;
     memset(packet.buffer, 0, MAX_PACKET_SIZE);
     packet.buffersize = sizeof(MESG::HEADER) + sizeof(ACK);
-    packet.address = to;
+    packet.address = connection.who;
 
     MESG* pMsg = (MESG*)packet.buffer;
     AddMagic(pMsg);
     pMsg->header.code = (uint8_t)MESG::HEADER::Codes::Ack;
-    pMsg->header.id = id;
-    pMsg->header.seq = 13;
+    pMsg->header.id = connection.id;
+    pMsg->header.seq = InterlockedIncrement(&connection.curuseq);;
     pMsg->header.ack = ack;
 
     Network::write(cmstate.netstate, packet);
@@ -417,15 +419,6 @@ ConnMan::UpdateConnection(
     Connection* pConn
 )
 {
-    if (pConn->state == Connection::State::DENIED)
-    {
-    }
-
-    if (pConn->state == Connection::State::IDENTIFYING)
-    {
-
-    }
-
     if (pConn->state == Connection::State::ALIVE)
     {
         //
@@ -482,6 +475,11 @@ ConnMan::UpdateConnection(
         pConn->reqstatusmutex.unlock();
 
         //
+        // Remove requests that are Dead
+        // 
+        ReapDeadRequests(pConn);
+
+        //
         // Send pings, that we use to track connection
         // health.
         //
@@ -491,11 +489,6 @@ ConnMan::UpdateConnection(
             pConn->heartbeat = clock::now();
             SendPingTo(*pConn);
         }
-
-        //
-        // Remove requests that are Dead
-        // 
-        ReapDeadRequests(pConn);
 
         d = clock::now() - pConn->lastrxtime;
         if (d.count() > cmstate.timeout_ms)
@@ -517,23 +510,31 @@ ConnMan::UpdateConnection(
                             nullptr);
         }
     } // If Alive
-
-
 }
 void
 ConnMan::UpdateClientConnection(
     Connection* pConn
 )
 {
-
-    //cmstate.connectionsmutex.lock();
-
-
     // Service outgoing reliable packets.
     //
     // We are only going to send a packet
     // if we are not currently waiting for an ack
     // from last packet. 
+    if (pConn->state == Connection::State::IDENTIFYING)
+    {
+        duration d2 = clock::now() - pConn->lasttxtime;
+        if (d2.count() > cmstate.timeout_ms)
+        {
+            pConn->state = Connection::State::DEAD;
+            cmstate.onevent(cmstate.oneventcontext,
+                ConnManState::OnEventType::CONNECTION_HANDSHAKE_TIMEOUT,
+                pConn,
+                nullptr);
+            pConn->connectingresultpromise->set_value(Connection::ConnectingResult::TIMEDOUT);
+        }
+    }
+
     if (pConn->state == Connection::State::GRANTED)
     {
         pConn->state = Connection::State::ALIVE;
@@ -543,35 +544,18 @@ ConnMan::UpdateClientConnection(
             nullptr);
         pConn->connectingresultpromise->set_value(Connection::ConnectingResult::GRANTED);
     }
-
-    UpdateConnection(pConn);
-
-    if (pConn->state == Connection::State::IDENTIFYING)
-    {
-        duration d2 = clock::now() - pConn->lasttxtime;
-        if (d2.count() > cmstate.timeout_ms)
-        {
-            pConn->state = Connection::State::DEAD;
-            cmstate.onevent(cmstate.oneventcontext,
-                            ConnManState::OnEventType::CONNECTION_HANDSHAKE_TIMEOUT,
-                            pConn,
-                            nullptr);
-            pConn->connectingresultpromise->set_value(Connection::ConnectingResult::TIMEDOUT);
-        }
-    }
-
+    
     if (pConn->state == Connection::State::DENIED)
     {
         pConn->state = Connection::State::DEAD;
         cmstate.onevent(cmstate.oneventcontext,
-                        ConnManState::OnEventType::CONNECTION_HANDSHAKE_DENIED,
-                        pConn,
-                        nullptr);
+            ConnManState::OnEventType::CONNECTION_HANDSHAKE_DENIED,
+            pConn,
+            nullptr);
         pConn->connectingresultpromise->set_value(Connection::ConnectingResult::DENIED);
     }
 
-
-    //cmstate.connectionsmutex.unlock();
+    UpdateConnection(pConn);
 }
 
 void
@@ -587,7 +571,7 @@ ConnMan::UpdateServerConnections(
             pConn,
             nullptr);
     }
-    UpdateConnection(pConn);
+    
 
     if (pConn->state == Connection::State::ALIVE)
     {
@@ -598,6 +582,7 @@ ConnMan::UpdateServerConnections(
             SendPingTo(*pConn);
         }
     }
+    UpdateConnection(pConn);
 }
 
 void
@@ -745,7 +730,7 @@ ConnMan::ProcessPong(
         MESG* msg = (MESG*)request->packet.buffer;
 
         pConn->reqstatusmutex.lock();
-        auto pReq = pConn->reqstatus.find(msg->header.seq);
+        auto pReq = pConn->reqstatus.find(msg->header.ack);
         pConn->reqstatusmutex.unlock();
 
         if (pReq != pConn->reqstatus.end())
@@ -798,18 +783,6 @@ ConnMan::ProcessGeneral(
     Request* request
 )
 {
-    std::random_device rd;     // only used once to initialise (seed) engine
-    std::mt19937 rng(rd());    // random-number engine used (Mersenne-Twister in this case)
-    std::uniform_int_distribution<uint32_t> uni(1, 65536); // guaranteed unbiased
-    // HACK FUZZ
-    auto random_integer = uni(rng);
-    if (random_integer < 20000)
-    {
-        std::cout << "Simulation: Dropping General Packet" << std::endl;
-        return ;
-    }
-
-
     if (pConn)
     {
         pConn->rxpacketmutex.lock();
@@ -822,7 +795,7 @@ ConnMan::ProcessGeneral(
         MESG* msg = (MESG*)request->packet.buffer;
         if (msg->header.mode == (uint8_t)MESG::HEADER::Mode::Reliable)
         {
-            SendAckTo(pConn->who, pConn->id, msg->header.seq);
+            SendAckTo(*pConn, msg->header.seq);
         }
     }
     else
@@ -884,6 +857,17 @@ ConnMan::ConnManClientIOHandler(
 {
     bali::Network::Result result(bali::Network::ResultType::SUCCESS);
     ConnMan& cm = *((ConnMan*)cm_);
+
+    std::random_device rd;     // only used once to initialise (seed) engine
+    std::mt19937 rng(rd());    // random-number engine used (Mersenne-Twister in this case)
+    std::uniform_int_distribution<uint32_t> uni(1, 65536); // guaranteed unbiased
+                                                           // HACK FUZZ
+    auto random_integer = uni(rng);
+    if (random_integer < 20000)
+    {
+        std::cout << "Simulation: Dropping General Packet" << std::endl;
+        return;
+    }
 
     cm.cmstate.connectionsmutex.lock();
     if (request->ioType == Request::IOType::READ)
@@ -974,26 +958,6 @@ ConnMan::ProcessIdentify(
         {
             if (cmstate.gamepass == GetGamePass(request->packet))
             {
-                std::random_device rd;     // only used once to initialise (seed) engine
-                std::mt19937 rng(rd());    // random-number engine used (Mersenne-Twister in this case)
-                std::uniform_int_distribution<uint32_t> uni(1, 65536); // guaranteed unbiased
-
-                auto random_integer = uni(rng);
-                // DEBUG
-                // HACK FUZZ
-                if (random_integer > 20000 && random_integer < 30000)
-                {
-                    std::cout << "Simulation: Dropping Identify Packet" << std::endl;
-                    return;
-                }
-                if (random_integer > 30000 && random_integer < 40000)
-                {
-                    std::cout << "Simulation: Sending Deny Packet" << std::endl;
-                    SendDenyTo(request->packet.address,
-                                GetPlayerName(request->packet));
-                    return;
-                }
-
                 std::string pn = GetPlayerName(request->packet);
                 uint16_t id = GetConnectionId(request->packet);
                 Connection* pConn = nullptr;
@@ -1069,6 +1033,17 @@ ConnMan::ConnManServerIOHandler(
     bali::Network::Result result(bali::Network::ResultType::SUCCESS);
     ConnMan& cm = *((ConnMan*)cm_);
 
+    std::random_device rd;     // only used once to initialise (seed) engine
+    std::mt19937 rng(rd());    // random-number engine used (Mersenne-Twister in this case)
+    std::uniform_int_distribution<uint32_t> uni(1, 65536); // guaranteed unbiased
+                                                           // HACK FUZZ
+    auto random_integer = uni(rng);
+    if (random_integer < 20000)
+    {
+        std::cout << "Simulation: Dropping General Packet" << std::endl;
+        return;
+    }
+
     if (request->ioType == Request::IOType::READ)
     {
         MESG* m = (MESG*)request->packet.buffer;
@@ -1088,6 +1063,12 @@ ConnMan::ConnManServerIOHandler(
         {
             if (IsSizeValid(request->packet))
             {
+                Connection* pConn;
+                uint32_t cid;
+                cid = GetConnectionId(request->packet);
+                cm.cmstate.connectionsmutex.lock();
+                pConn = ConnMan::GetConnectionById(cm.cmstate.connections, cid);
+                cm.cmstate.connectionsmutex.unlock();
                 if (IsCode(request->packet, MESG::HEADER::Codes::Identify))
                 {
                     // Rx'd an IDENTIFY packet.
@@ -1100,30 +1081,18 @@ ConnMan::ConnManServerIOHandler(
                 {
                     // Rx'd an ACk. 
                     // Something is eagerly awaiting this i'm sure.
-                    uint32_t cid = GetConnectionId(request->packet);
-                    cm.cmstate.connectionsmutex.lock();
-                    Connection* pConn = ConnMan::GetConnectionById(cm.cmstate.connections, cid);
-                    cm.cmstate.connectionsmutex.unlock();
                     cm.ProcessAck(pConn, request);
                 }
                 else if (IsCode(request->packet, MESG::HEADER::Codes::Ping))
                 {
                     // Rx'd an Ping. 
                     // Something is eagerly awaiting our response
-                    uint32_t cid = GetConnectionId(request->packet);
-                    cm.cmstate.connectionsmutex.lock();
-                    Connection* pConn = ConnMan::GetConnectionById(cm.cmstate.connections, cid);
-                    cm.cmstate.connectionsmutex.unlock();
                     cm.ProcessPing(pConn, request);
                 }
                 else if (IsCode(request->packet, MESG::HEADER::Codes::Pong))
                 {
                     // Rx'd an Pong. 
                     // We are eagerly awaiting this pong
-                    uint32_t cid = GetConnectionId(request->packet);
-                    cm.cmstate.connectionsmutex.lock();
-                    Connection* pConn = ConnMan::GetConnectionById(cm.cmstate.connections, cid);
-                    cm.cmstate.connectionsmutex.unlock();
                     cm.ProcessPong(pConn, request);
                 }
                 else
@@ -1131,12 +1100,6 @@ ConnMan::ConnManServerIOHandler(
                     //
                     // Rx'd something other than Identify, or Ack
                     //
-                    Connection* pConn;
-                    uint32_t cid;
-                    cid = GetConnectionId(request->packet);
-                    cm.cmstate.connectionsmutex.lock();
-                    pConn = ConnMan::GetConnectionById(cm.cmstate.connections, cid);
-                    cm.cmstate.connectionsmutex.unlock();
                     cm.ProcessGeneral(pConn, request);
                 }
             }

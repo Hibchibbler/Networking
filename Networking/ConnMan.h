@@ -268,8 +268,7 @@ public:
 
     void
     SendAckTo(
-        Address to,
-        uint32_t id,
+        Connection & connection,
         uint32_t ack
     );
 

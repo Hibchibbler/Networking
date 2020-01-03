@@ -471,6 +471,8 @@ Network::Result Network::start(NetworkState& netstate)
 
     // Weird way to kick of first read. but ok...
     assert(Network::read(netstate).type == bali::Network::ResultType::SUCCESS);
+    assert(Network::read(netstate).type == bali::Network::ResultType::SUCCESS);
+    assert(Network::read(netstate).type == bali::Network::ResultType::SUCCESS);
     return result;
 }
 

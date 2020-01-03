@@ -198,6 +198,7 @@ RemoveRequestStatus(
     uint32_t sid
 )
 {
+    std::cout << "Removing Dead Request...\n";
     connection.reqstatusmutex.lock();
     connection.reqstatus.erase(sid);
     connection.reqstatusmutex.unlock();
