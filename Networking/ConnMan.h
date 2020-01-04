@@ -78,6 +78,7 @@ public:
         TIMEDOUT
     };
 
+
     enum class State {
         DEAD,
         DYING,
@@ -87,14 +88,61 @@ public:
         IDENTIFYING
     };
 
-    //Connection()
-    //    : cmpromise(std::make_shared<std::promise<ConnectionStatus>>())
-    //    {}
+    typedef std::shared_ptr<Connection> ConnectionPtr;
+
+
+    void
+    Initialize(
+        Address to,
+        std::string playername,
+        uint32_t uid,
+        Connection::Locality locality,
+        Connection::State initstate
+    )
+    {
+        // But we don't know it's ID yet
+        // because we have not yet been GRANTed
+        id = uid;
+        state = initstate;
+        curseq = 0;
+        curack = 0;
+        highseq = 0;
+        curuseq = 0;
+        curuack = 0;
+        highuseq = 0;
+        lastrxtime = clock::now();
+        lasttxtime = clock::now();
+
+        heartbeat = clock::now();
+        reqstatusmutex.create();
+        rxpacketmutex.create();
+        who = to;
+        playername = playername;
+        this->locality = locality;
+    }
+
+    Connection::ConnectingResult
+    Connect(
+        uint32_t randomcode,
+        std::string gamename,
+        std::string gamepass
+    );
+
+    void
+    RemoveRequestStatus(
+        uint32_t sid
+    );
+
+    void
+    AddRequestStatus(
+        RequestStatus & rs,
+        uint32_t seq
+    );
 
     std::map<uint32_t, RequestStatus>::iterator
-        GetRequestStatus(
-            uint32_t index
-        );
+    GetRequestStatus(
+        uint32_t index
+    );
 
     std::string         playername;
     State               state;
@@ -181,8 +229,36 @@ struct ConnManState
 
     NetworkState            netstate;
     Mutex                   connectionsmutex;
-    std::list<Connection>   connections;
-    Connection              localconn;
+    
+
+    std::list<Connection::ConnectionPtr>   connections;
+
+    void
+    AddConnection(Connection::ConnectionPtr pConn)
+    {
+        connectionsmutex.lock();
+        connections.push_back(pConn);
+        connectionsmutex.unlock();
+    }
+
+    std::shared_ptr<Connection>
+    CreateConnection(
+        Address to,
+        std::string playername,
+        uint32_t uid,
+        Connection::Locality locality,
+        Connection::State initstate
+    )
+    {
+        Connection::ConnectionPtr newConn = std::make_shared<Connection>();
+        newConn->Initialize(to, playername, uid, locality, initstate);
+        return newConn;
+    }
+
+    
+
+
+    //Connection              localconn;
 
     OnEvent                 onevent;
     void*                   oneventcontext;
@@ -201,11 +277,7 @@ class ConnMan
 public:
     typedef void (*AcknowledgeHandler)(uint32_t code);
 
-    enum class SendType
-    {
-        WITHOUTRECEIPT,
-        WITHRECEIPT
-    };
+
     ConnMan(){}
     ~ConnMan(){}
 
@@ -221,18 +293,20 @@ public:
         void* oneventcontext
     );
 
+
+
     void
     UpdateServerConnections(
-        Connection* pConn
+        Connection::ConnectionPtr pConn
     );
 
     void
     UpdateClientConnection(
-        Connection* pConn
+        Connection::ConnectionPtr pConn
     );
     void
     UpdateConnection(
-        Connection* pConn
+        Connection::ConnectionPtr pConn
     );
 
     void
@@ -249,63 +323,29 @@ public:
     Cleanup(
     );
 
-    RequestFuture
-    SendBuffer(
-        Connection & connection,
-        SendType sendType,
-        uint8_t* buffer,
-        uint32_t buffersize,
-        uint32_t& token
-    );
+    enum class SendType
+    {
+        WITHOUTRECEIPT,
+        WITHRECEIPT
+    };
 
     bool
     SendTryReliable(
-        Connection & connection,
+        NetworkState& netstate,
+        Connection::ConnectionPtr pConn,
         uint8_t* buffer,
         uint32_t buffersize,
         uint32_t& request_index
     );
 
-    void
-    SendAckTo(
-        Connection & connection,
-        uint32_t ack
-    );
-
-    //RequestFuture
-    void
-    SendPingTo(
-        Connection & connection//,
-        //uint32_t & request_index
-    );
-
-    void
-    SendPongTo(
-        Connection & connection,
-        uint32_t ack
-    );
-
-    uint64_t
-    SendIdentify(
-        Connection& connection,
-        uint32_t randomcode,
-        std::string gamename,
-        std::string gamepass
-    );
-
-    Connection::ConnectingResult
-    Connect(
-        Connection& connection,
-        uint32_t randomcode,
-        std::string gamename,
-        std::string gamepass
-    );
-
-    uint64_t
-    SendGrantTo(
-        Address to,
-        uint32_t id,
-        std::string playername
+    RequestFuture
+    SendBuffer(
+        NetworkState& netstate,
+        Connection::ConnectionPtr pConn,
+        SendType sendType,
+        uint8_t* buffer,
+        uint32_t buffersize,
+        uint32_t& token
     );
 
         void
@@ -315,44 +355,38 @@ public:
 
     void
     ProcessGeneral(
-        Connection* pConn,
+        Connection::ConnectionPtr pConn,
         Request* request
     );
 
     void
     ProcessAck(
-        Connection* pConn,
+        Connection::ConnectionPtr pConn,
         Request* request
     );
 
     void
     ProcessDeny(
-        Connection* pConn,
+        Connection::ConnectionPtr pConn,
         Request* request
     );
 
     void
     ProcessGrant(
-        Connection* pConn,
+        Connection::ConnectionPtr pConn,
         Request* request
     );
 
     void
     ProcessPing(
-        Connection* pConn,
+        Connection::ConnectionPtr pConn,
         Request* request
     );
 
     void
     ProcessPong(
-        Connection* pConn,
+        Connection::ConnectionPtr pConn,
         Request* request
-    );
-
-    uint64_t
-    SendDenyTo(
-        Address to,
-        std::string playername
     );
 
     static
@@ -372,23 +406,25 @@ public:
     );
 
     static
-    Connection*
+    Connection::ConnectionPtr
     GetConnectionById(
-        std::list<Connection> & connections,
+        Mutex & mutex,
+        std::list<Connection::ConnectionPtr> & connections,
         uint32_t id
     );
 
     static
     bool
     RemoveConnectionByName(
-        std::list<Connection> & connections,
+        std::list<Connection::ConnectionPtr> & connections,
         std::string playername
     );
 
     static
     bool
-        IsPlayerNameAndIdAvailable(
-        std::list<Connection> & connections,
+    IsPlayerNameAndIdAvailable(
+        Mutex & mutex,
+        std::list<Connection::ConnectionPtr> & connections,
         std::string name,
         uint16_t id
     );
@@ -399,12 +435,12 @@ public:
 
     void
     KillDyingRequests(
-        Connection* pConn
+        Connection::ConnectionPtr  pConn
     );
 
     void
     ReapDeadRequests(
-        Connection* pConn
+        Connection::ConnectionPtr  pConn
     );
 
     ConnManState cmstate;

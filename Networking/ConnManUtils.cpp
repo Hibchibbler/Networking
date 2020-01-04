@@ -3,6 +3,187 @@
 namespace bali
 {
 
+
+Packet
+CreateIdentifyPacket(
+    Address& to,
+    std::string playername,
+    uint32_t& curseq,
+    uint32_t randomcode,
+    std::string gamename,
+    std::string gamepass
+)
+{
+    Packet packet;
+    uint32_t traits = 0;
+
+    //
+    // Kick off the connection sequence.
+    //
+    memset(packet.buffer, 0, MAX_PACKET_SIZE);
+    packet.buffersize = sizeof(MESG::HEADER) + sizeof(IDENTIFY);
+    packet.address = to;
+
+    MESG* pMsg = (MESG*)packet.buffer;
+    AddMagic(pMsg);
+    pMsg->header.code = (uint8_t)MESG::HEADER::Codes::Identify;
+    pMsg->header.id = randomcode;
+    pMsg->header.seq = InterlockedIncrement(&curseq);//(&conn.curuseq);
+
+    memcpy(pMsg->payload.identify.playername,
+        playername.c_str(),
+        playername.size());
+
+    memcpy(pMsg->payload.identify.gamename,
+        gamename.c_str(),
+        gamename.size());
+
+    memcpy(pMsg->payload.identify.gamepass,
+        gamepass.c_str(),
+        gamepass.size());
+
+    //TODO TOAD
+    //conn.identtime = clock::now();
+    //conn.state = Connection::State::IDENTIFYING;
+    //conn.locality = Connection::Locality::LOCAL;
+
+    //TODO ZEBRA
+    //cmstate.connectionsmutex.lock();
+    //cmstate.connections.push_back(connection);
+    //cmstate.connectionsmutex.unlock();
+    //Network::write(*netstate, packet);
+
+
+    return packet;
+}
+Packet
+CreatePongPacket(
+    Address& to,
+    uint32_t id,
+    uint32_t& curseq,
+    uint32_t ack
+)
+{
+    Packet packet;
+    memset(packet.buffer, 0, MAX_PACKET_SIZE);
+    packet.buffersize = sizeof(MESG::HEADER) + sizeof(PINGPONG);
+    packet.address = to;
+
+    MESG* pMsg = (MESG*)packet.buffer;
+    AddMagic(pMsg);
+    pMsg->header.mode = (uint8_t)MESG::HEADER::Mode::Unreliable;
+    pMsg->header.code = (uint8_t)MESG::HEADER::Codes::Pong;
+    pMsg->header.id = id;
+    pMsg->header.seq = InterlockedIncrement(&curseq);
+    pMsg->header.ack = ack;
+
+    //Network::write(*netstate, packet);
+    return packet;
+}
+//RequestFuture
+Packet
+CreatePingPacket(
+    Address& to,
+    uint32_t id,
+    uint32_t& curseq
+)
+{
+    Packet packet;
+    //RequestFuture future;
+    memset(packet.buffer, 0, MAX_PACKET_SIZE);
+    packet.buffersize = sizeof(MESG::HEADER) + sizeof(PINGPONG);
+    packet.address = to;
+
+    MESG* pMsg = (MESG*)packet.buffer;
+    AddMagic(pMsg);
+    pMsg->header.mode = (uint8_t)MESG::HEADER::Mode::Unreliable;
+    pMsg->header.code = (uint8_t)MESG::HEADER::Codes::Ping;
+    pMsg->header.id = id;
+    pMsg->header.seq = InterlockedIncrement(&curseq);
+
+
+    return packet;
+}
+
+Packet
+CreateGrantPacket(
+    Address to,
+    uint32_t id,
+    uint32_t& curseq,
+    std::string playername
+)
+{
+    Packet packet;
+    memset(packet.buffer, 0, MAX_PACKET_SIZE);
+    packet.buffersize = sizeof(MESG::HEADER) + sizeof(GRANT);
+    packet.address = to;
+
+    MESG* pMsg = (MESG*)packet.buffer;
+    AddMagic(pMsg);
+    pMsg->header.code = (uint8_t)MESG::HEADER::Codes::Grant;
+    pMsg->header.id = id;
+    pMsg->header.seq = InterlockedIncrement(&curseq);
+
+    memcpy(pMsg->payload.identify.playername,
+        playername.c_str(),
+        playername.size());
+
+    //Network::write(*netstate, packet);
+    return packet;
+}
+
+Packet
+CreateDenyPacket(
+    Address to,
+    std::string playername
+)
+{
+    Packet packet;
+    memset(packet.buffer, 0, MAX_PACKET_SIZE);
+    packet.buffersize = sizeof(MESG::HEADER) + sizeof(DENY);
+    packet.address = to;
+
+    MESG* pMsg = (MESG*)packet.buffer;
+    AddMagic(pMsg);
+    pMsg->header.code = (uint8_t)MESG::HEADER::Codes::Deny;
+    pMsg->header.id = 0;
+    pMsg->header.seq = 13;
+
+    memcpy(pMsg->payload.identify.playername,
+        playername.c_str(),
+        playername.size());
+
+    //Network::write(netstate, packet);
+    return packet;
+}
+
+Packet
+CreateAckPacket(
+    Address& to,
+    uint32_t id,
+    uint32_t& curseq,
+    uint32_t ack
+)
+{
+    Packet packet;
+    memset(packet.buffer, 0, MAX_PACKET_SIZE);
+    packet.buffersize = sizeof(MESG::HEADER) + sizeof(ACK);
+    packet.address = to;
+
+    MESG* pMsg = (MESG*)packet.buffer;
+    AddMagic(pMsg);
+    pMsg->header.code = (uint8_t)MESG::HEADER::Codes::Ack;
+    pMsg->header.id = id;
+    pMsg->header.seq = InterlockedIncrement(&curseq);
+    pMsg->header.ack = ack;
+
+    //Network::write(*netstate, packet);
+    return packet;
+}
+
+
+
+
 void
 AddMagic(
     MESG* pMsg
@@ -180,42 +361,20 @@ GetGamePass(
         strlen(pMsg->payload.identify.gamepass));
 }
 
-void
-AddRequestStatus(
-    Connection & connection,
-    RequestStatus & rs,
-    uint32_t seq
-)
-{
-    connection.reqstatusmutex.lock();
-    connection.reqstatus.emplace(seq, rs);
-    connection.reqstatusmutex.unlock();
-}
 
-void
-RemoveRequestStatus(
-    Connection & connection,
-    uint32_t sid
-)
-{
-    std::cout << "Removing Dead Request...\n";
-    connection.reqstatusmutex.lock();
-    connection.reqstatus.erase(sid);
-    connection.reqstatusmutex.unlock();
-}
 
-std::map<uint32_t, RequestStatus>::iterator
-GetRequestStatus(
-    Connection & connection,
-    uint32_t index
-)
-{
-    connection.reqstatusmutex.lock();
-    auto iter = connection.reqstatus.find(index);
-    connection.reqstatusmutex.unlock();
-
-    return iter;
-}
+//std::map<uint32_t, RequestStatus>::iterator
+//GetRequestStatus(
+//    Connection & connection,
+//    uint32_t index
+//)
+//{
+//    connection.reqstatusmutex.lock();
+//    auto iter = connection.reqstatus.find(index);
+//    connection.reqstatusmutex.unlock();
+//
+//    return iter;
+//}
 
 
 

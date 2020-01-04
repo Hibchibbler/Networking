@@ -92,32 +92,61 @@ static const char* CodeName[] = {
     "Pong"
 };
 
-void
-AddRequestStatus(
-    Connection & connection,
-    RequestStatus & rs,
-    uint32_t seq
+//std::map<uint32_t, RequestStatus>::iterator
+//GetRequestStatus(
+//    Connection & connection,
+//    uint32_t index
+//);
+//
+Packet
+CreateGrantPacket(
+    Address to,
+    uint32_t id,
+    uint32_t& curseq,
+    std::string playername
 );
 
-std::map<uint32_t, RequestStatus>::iterator
-GetRequestStatus(
-    Connection & connection,
-    uint32_t index
-);
-
-void
-RemoveRequestStatus(
-    Connection & connection,
-    uint32_t sid
-);
-
-void
-InitializeConnection(
-    Connection* pConn,
+Packet
+CreateDenyPacket(
     Address to,
     std::string playername
 );
 
+
+
+Packet
+CreateAckPacket(
+    Address& to,
+    uint32_t id,
+    uint32_t& curseq,
+    uint32_t ack
+);
+
+//RequestFuture
+Packet
+CreatePingPacket(
+    Address& to,
+    uint32_t id,
+    uint32_t& curseq
+);
+
+Packet
+CreatePongPacket(
+    Address& to,
+    uint32_t id,
+    uint32_t& curseq,
+    uint32_t ack
+);
+
+Packet
+CreateIdentifyPacket(
+    Address& to,
+    std::string playername,
+    uint32_t& curseq,
+    uint32_t randomcode,
+    std::string gamename,
+    std::string gamepass
+);
 
 void
 AddMagic(
