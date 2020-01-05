@@ -9,6 +9,7 @@ CreateIdentifyPacket(
     Address& to,
     std::string playername,
     uint32_t& curseq,
+    uint32_t curack,
     uint32_t randomcode,
     std::string gamename,
     std::string gamepass
@@ -28,8 +29,9 @@ CreateIdentifyPacket(
     AddMagic(pMsg);
     pMsg->header.code = (uint8_t)MESG::HEADER::Codes::Identify;
     pMsg->header.id = randomcode;
-    pMsg->header.seq = InterlockedIncrement(&curseq);//(&conn.curuseq);
-
+    curseq = randomcode;
+    pMsg->header.seq = InterlockedIncrement(&curseq);
+    pMsg->header.ack = curack;
     memcpy(pMsg->payload.identify.playername,
         playername.c_str(),
         playername.size());
@@ -77,15 +79,15 @@ CreatePongPacket(
     pMsg->header.seq = InterlockedIncrement(&curseq);
     pMsg->header.ack = ack;
 
-    //Network::write(*netstate, packet);
     return packet;
 }
-//RequestFuture
+
 Packet
 CreatePingPacket(
     Address& to,
     uint32_t id,
-    uint32_t& curseq
+    uint32_t& curseq,
+    uint32_t curack
 )
 {
     Packet packet;
@@ -100,8 +102,7 @@ CreatePingPacket(
     pMsg->header.code = (uint8_t)MESG::HEADER::Codes::Ping;
     pMsg->header.id = id;
     pMsg->header.seq = InterlockedIncrement(&curseq);
-
-
+    pMsg->header.ack = curack;
     return packet;
 }
 
@@ -110,6 +111,7 @@ CreateGrantPacket(
     Address to,
     uint32_t id,
     uint32_t& curseq,
+    uint32_t curack,
     std::string playername
 )
 {
@@ -123,12 +125,11 @@ CreateGrantPacket(
     pMsg->header.code = (uint8_t)MESG::HEADER::Codes::Grant;
     pMsg->header.id = id;
     pMsg->header.seq = InterlockedIncrement(&curseq);
-
+    pMsg->header.ack = curack;
     memcpy(pMsg->payload.identify.playername,
         playername.c_str(),
         playername.size());
 
-    //Network::write(*netstate, packet);
     return packet;
 }
 
@@ -153,7 +154,6 @@ CreateDenyPacket(
         playername.c_str(),
         playername.size());
 
-    //Network::write(netstate, packet);
     return packet;
 }
 
@@ -177,7 +177,6 @@ CreateAckPacket(
     pMsg->header.seq = InterlockedIncrement(&curseq);
     pMsg->header.ack = ack;
 
-    //Network::write(*netstate, packet);
     return packet;
 }
 
@@ -203,6 +202,8 @@ SizeofPayload(
     if (code == MESG::HEADER::Codes::Deny) { payloadSize += sizeof(DENY); }
     if (code == MESG::HEADER::Codes::General) { payloadSize += sizeof(GENERAL); }
     if (code == MESG::HEADER::Codes::Ack) { payloadSize += sizeof(ACK); }
+    if (code == MESG::HEADER::Codes::Ping ||
+        code == MESG::HEADER::Codes::Pong) { payloadSize += sizeof(PINGPONG); }
 
     return payloadSize;
 }
@@ -360,23 +361,6 @@ GetGamePass(
     return std::string(pMsg->payload.identify.gamepass,
         strlen(pMsg->payload.identify.gamepass));
 }
-
-
-
-//std::map<uint32_t, RequestStatus>::iterator
-//GetRequestStatus(
-//    Connection & connection,
-//    uint32_t index
-//)
-//{
-//    connection.reqstatusmutex.lock();
-//    auto iter = connection.reqstatus.find(index);
-//    connection.reqstatusmutex.unlock();
-//
-//    return iter;
-//}
-
-
 
 
 

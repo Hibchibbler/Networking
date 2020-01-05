@@ -28,14 +28,9 @@ struct RequestStatus
         PENDING,
         FAILED,
         SUCCEEDED,
-        DYING,
-        DEAD
+        DYING, // These requests will be removed manually
+        DEAD   // These will be removed automatically.
     };
-
-    //enum class SendStyle {
-    //    AUTO_REMOVE_REQUEST,
-    //    MANUAL_REMOVE_REQUEST
-    //};
 
     RequestStatus()
     {
@@ -90,7 +85,6 @@ public:
 
     typedef std::shared_ptr<Connection> ConnectionPtr;
 
-
     void
     Initialize(
         Address to,
@@ -144,6 +138,10 @@ public:
         uint32_t index
     );
 
+    void
+    ReapDeadRequests(
+    );
+
     std::string         playername;
     State               state;
     uint32_t            id;
@@ -166,9 +164,13 @@ public:
 
     clock::time_point   heartbeat;
     clock::time_point   pingstart;
+    uint32_t            curpingseq;
     clock::time_point   pingend;
 
+
     std::list<uint32_t> pingtimes;
+    uint32_t            totalpings;
+    uint32_t            totalpongs;
     float               avgping;
     uint32_t            curping;
     uint32_t            minping;
@@ -204,7 +206,10 @@ struct ConnManState
         CONNECTION_TIMEOUT,
         MESSAGE_ACK_TIMEOUT,
         MESSAGE_ACK_RECEIVED,
-        MESSAGE_RECEIVED
+        MESSAGE_RECEIVED,
+        NOTIFICATION_INFO,
+        NOTIFICATION_WARNING,
+        NOTIFICATION_ERROR
     };
     typedef void(*OnEvent)(void* oecontext, OnEventType t, Connection* conn, Packet* packet);
     ConnManType             cmtype;
@@ -236,6 +241,7 @@ struct ConnManState
     void
     AddConnection(Connection::ConnectionPtr pConn)
     {
+        std::cout << "AddConnection: Connections.size= " << connections.size() << std::endl;
         connectionsmutex.lock();
         connections.push_back(pConn);
         connectionsmutex.unlock();
@@ -254,11 +260,6 @@ struct ConnManState
         newConn->Initialize(to, playername, uid, locality, initstate);
         return newConn;
     }
-
-    
-
-
-    //Connection              localconn;
 
     OnEvent                 onevent;
     void*                   oneventcontext;
@@ -318,6 +319,10 @@ public:
         uint32_t ms_elapsed
     );
 
+    void
+    RemoveConnection(
+        uint32_t uid
+    );
 
     void
     Cleanup(
@@ -329,23 +334,18 @@ public:
         WITHRECEIPT
     };
 
-    bool
-    SendTryReliable(
-        NetworkState& netstate,
-        Connection::ConnectionPtr pConn,
-        uint8_t* buffer,
-        uint32_t buffersize,
-        uint32_t& request_index
-    );
-
     RequestFuture
     SendBuffer(
-        NetworkState& netstate,
         Connection::ConnectionPtr pConn,
         SendType sendType,
         uint8_t* buffer,
         uint32_t buffersize,
         uint32_t& token
+    );
+
+    void
+    Write(
+        Packet& packet
     );
 
         void
@@ -433,15 +433,8 @@ public:
     ReadyCount(
     );
 
-    void
-    KillDyingRequests(
-        Connection::ConnectionPtr  pConn
-    );
 
-    void
-    ReapDeadRequests(
-        Connection::ConnectionPtr  pConn
-    );
+
 
     ConnManState cmstate;
 };

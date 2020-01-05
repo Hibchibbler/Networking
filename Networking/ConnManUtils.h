@@ -103,6 +103,7 @@ CreateGrantPacket(
     Address to,
     uint32_t id,
     uint32_t& curseq,
+    uint32_t curack,
     std::string playername
 );
 
@@ -111,8 +112,6 @@ CreateDenyPacket(
     Address to,
     std::string playername
 );
-
-
 
 Packet
 CreateAckPacket(
@@ -127,7 +126,8 @@ Packet
 CreatePingPacket(
     Address& to,
     uint32_t id,
-    uint32_t& curseq
+    uint32_t& curseq,
+    uint32_t curack
 );
 
 Packet
@@ -143,6 +143,7 @@ CreateIdentifyPacket(
     Address& to,
     std::string playername,
     uint32_t& curseq,
+    uint32_t curack,
     uint32_t randomcode,
     std::string gamename,
     std::string gamepass

@@ -379,10 +379,20 @@ void* Network::WorkerThread(NetworkState* netstate)
         }
         else
         {
+            // pOver may not be null
+            // Which means this request was dequeued..
+            // therefore, we can release it.
+            if (pOver != NULL)
+            {
+                Request* request = reinterpret_cast<Request*>(pOver);
+                netstate->socket.overlapPool.release(request->index);
+            }
+
             DWORD gle = GetLastError();
             if (gle == ERROR_PORT_UNREACHABLE)
             {
                 std::cout << "Worker: A sent packet was rejected\n" << std::endl;
+                Network::read(*netstate);
             }
             else
             {
@@ -470,9 +480,12 @@ Network::Result Network::start(NetworkState& netstate)
     Network::startWorkerThreads(netstate);
 
     // Weird way to kick of first read. but ok...
-    assert(Network::read(netstate).type == bali::Network::ResultType::SUCCESS);
-    assert(Network::read(netstate).type == bali::Network::ResultType::SUCCESS);
-    assert(Network::read(netstate).type == bali::Network::ResultType::SUCCESS);
+    uint32_t rc=0;
+    do
+    {
+        assert(Network::read(netstate).type == bali::Network::ResultType::SUCCESS);
+        rc++;
+    }while (rc < netstate.maxThreads/2);
     return result;
 }
 
