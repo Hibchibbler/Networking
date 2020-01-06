@@ -134,6 +134,51 @@ CreateGrantPacket(
 }
 
 Packet
+CreateGrackPacket(
+    Address to,
+    uint32_t id,
+    uint32_t& curseq,
+    uint32_t curack
+)
+{
+    Packet packet;
+    memset(packet.buffer, 0, MAX_PACKET_SIZE);
+    packet.buffersize = sizeof(MESG::HEADER) + sizeof(GRACK);
+    packet.address = to;
+
+    MESG* pMsg = (MESG*)packet.buffer;
+    AddMagic(pMsg);
+    pMsg->header.code = (uint8_t)MESG::HEADER::Codes::Grack;
+    pMsg->header.id = id;
+    pMsg->header.seq = InterlockedIncrement(&curseq);
+    pMsg->header.ack = curack;
+
+    return packet;
+}
+Packet
+CreateDisconnectPacket(
+    Address to,
+    uint32_t id,
+    uint32_t& curseq,
+    uint32_t curack
+)
+{
+    Packet packet;
+    memset(packet.buffer, 0, MAX_PACKET_SIZE);
+    packet.buffersize = sizeof(MESG::HEADER) + sizeof(DISCONNECT);
+    packet.address = to;
+
+    MESG* pMsg = (MESG*)packet.buffer;
+    AddMagic(pMsg);
+    pMsg->header.code = (uint8_t)MESG::HEADER::Codes::Disconnect;
+    pMsg->header.id = id;
+    pMsg->header.seq = InterlockedIncrement(&curseq);
+    pMsg->header.ack = curack;
+
+    return packet;
+}
+
+Packet
 CreateDenyPacket(
     Address to,
     std::string playername

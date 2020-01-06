@@ -44,6 +44,15 @@ struct PINGPONG
 
 };
 
+struct DISCONNECT
+{
+
+};
+
+struct GRACK
+{
+
+};
 
 struct MESG
 {
@@ -52,7 +61,9 @@ struct MESG
         enum class Codes {
             Identify,
             Grant,
+            Grack,
             Deny,
+            Disconnect,
             General,
             Ack,
             Ping,
@@ -79,13 +90,17 @@ struct MESG
         GENERAL     general;    // Client Rx & Server Rx
         ACK         ack;
         PINGPONG    pingpong;
+        DISCONNECT  disconnect;
+        GRACK       grack;
     }payload;
 };
 
 static const char* CodeName[] = {
     "Identify",
     "Grant",
+    "Grack",
     "Deny",
+    "Disconnect",
     "General",
     "Ack",
     "Ping",
@@ -218,6 +233,21 @@ CreateAddress(
     const char* szIpv4
 );
 
+Packet
+CreateDisconnectPacket(
+    Address to,
+    uint32_t id,
+    uint32_t& curseq,
+    uint32_t curack
+);
+
+Packet
+CreateGrackPacket(
+    Address to,
+    uint32_t id,
+    uint32_t& curseq,
+    uint32_t curack
+);
 
 }
 

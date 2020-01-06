@@ -77,7 +77,9 @@ public:
     enum class State {
         DEAD,
         DYING,
+        DISCONNECTING,
         GRANTED,
+        GRACKING,
         DENIED,
         ALIVE,
         IDENTIFYING
@@ -202,6 +204,7 @@ struct ConnManState
         CONNECTION_HANDSHAKE_GRANTED,    // Server Side Event
         CONNECTION_HANDSHAKE_DENIED,
         CONNECTION_HANDSHAKE_TIMEOUT,
+        CONNECTION_HANDSHAKE_TIMEOUT_NOGRACK,
         CONNECTION_TIMEOUT_WARNING,
         CONNECTION_TIMEOUT,
         MESSAGE_ACK_TIMEOUT,
@@ -348,7 +351,12 @@ public:
         Packet& packet
     );
 
-        void
+    void
+    ProcessDisconnect(
+        Connection::ConnectionPtr pConn
+    );
+
+    void
     ProcessIdentify(
         Request* request
     );
@@ -373,6 +381,12 @@ public:
 
     void
     ProcessGrant(
+        Connection::ConnectionPtr pConn,
+        Request* request
+    );
+
+    void
+    ProcessGrack(
         Connection::ConnectionPtr pConn,
         Request* request
     );
