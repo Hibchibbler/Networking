@@ -82,7 +82,7 @@ public:
         GRACKING,
         DENIED,
         ALIVE,
-        IDENTIFYING
+        IDENTIFIED
     };
 
     typedef std::shared_ptr<Connection> ConnectionPtr;
@@ -239,6 +239,9 @@ struct ConnManState
     Mutex                   connectionsmutex;
     
 
+    Mutex               globalrxmutex;
+    std::queue<Packet>  globalrxqueue;
+
     std::list<Connection::ConnectionPtr>   connections;
 
     void
@@ -362,45 +365,50 @@ public:
     );
 
     void
+    ProcessRxPacket(
+        Packet& packet
+    );
+
+    void
     ProcessGeneral(
         Connection::ConnectionPtr pConn,
-        Request* request
+        Packet& packet
     );
 
     void
     ProcessAck(
         Connection::ConnectionPtr pConn,
-        Request* request
+        Packet& packet
     );
 
     void
     ProcessDeny(
         Connection::ConnectionPtr pConn,
-        Request* request
+        Packet& packet
     );
 
     void
     ProcessGrant(
         Connection::ConnectionPtr pConn,
-        Request* request
+        Packet& packet
     );
 
     void
     ProcessGrack(
         Connection::ConnectionPtr pConn,
-        Request* request
+        Packet& packet
     );
 
     void
     ProcessPing(
         Connection::ConnectionPtr pConn,
-        Request* request
+        Packet& packet
     );
 
     void
     ProcessPong(
         Connection::ConnectionPtr pConn,
-        Request* request
+        Packet& packet
     );
 
     static
@@ -422,6 +430,13 @@ public:
     static
     Connection::ConnectionPtr
     GetConnectionById(
+        std::list<Connection::ConnectionPtr> & connections,
+        uint32_t id
+    );
+
+    static
+    Connection::ConnectionPtr
+    GetConnectionById(
         Mutex & mutex,
         std::list<Connection::ConnectionPtr> & connections,
         uint32_t id
@@ -429,11 +444,12 @@ public:
 
     static
     bool
-    RemoveConnectionByName(
+    IsPlayerNameAndIdAvailable(
         std::list<Connection::ConnectionPtr> & connections,
-        std::string playername
+        std::string name,
+        uint16_t id
     );
-
+    
     static
     bool
     IsPlayerNameAndIdAvailable(
@@ -441,6 +457,13 @@ public:
         std::list<Connection::ConnectionPtr> & connections,
         std::string name,
         uint16_t id
+    );
+
+    static
+    bool
+    RemoveConnectionByName(
+        std::list<Connection::ConnectionPtr> & connections,
+        std::string playername
     );
 
     uint64_t

@@ -350,7 +350,7 @@ PrintMsgHeader(
 }
 
 std::string
-GetPlayerName(
+GetPlayerNameFromPacket(
     Packet & packet
 )
 {

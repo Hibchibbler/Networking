@@ -24,9 +24,6 @@
     <ClInclude Include="ConnMan.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="CommMan.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="SlabPool.h">
       <Filter>Header Files</Filter>
     </ClInclude>

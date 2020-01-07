@@ -152,7 +152,6 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="CommMan.h" />
     <ClInclude Include="ConfigLoader.h" />
     <ClInclude Include="ConnMan.h" />
     <ClInclude Include="ConnManUtils.h" />
