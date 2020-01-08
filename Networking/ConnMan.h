@@ -26,8 +26,7 @@ struct RequestStatus
     };
     enum class State {
         PENDING,
-        FAILED,
-        SUCCEEDED,
+        ACKNOWLEDGED,
         DYING, // These requests will be removed manually
         DEAD   // These will be removed automatically.
     };
@@ -198,7 +197,8 @@ struct ConnManState
 {
     enum class ConnManType {
         CLIENT,
-        SERVER
+        SERVER,
+        RELAY
     };
     enum class OnEventType {
         CONNECTION_HANDSHAKE_GRANTED,    // Server Side Event
@@ -207,6 +207,7 @@ struct ConnManState
         CONNECTION_HANDSHAKE_TIMEOUT_NOGRACK,
         CONNECTION_TIMEOUT_WARNING,
         CONNECTION_TIMEOUT,
+        CONNECTION_DISCONNECT,
         MESSAGE_ACK_TIMEOUT,
         MESSAGE_ACK_RECEIVED,
         MESSAGE_RECEIVED,
@@ -267,6 +268,11 @@ struct ConnManState
         return newConn;
     }
 
+    void
+    RemoveConnection(
+        uint32_t uid
+    );
+
     OnEvent                 onevent;
     void*                   oneventcontext;
 
@@ -300,7 +306,10 @@ public:
         void* oneventcontext
     );
 
-
+    void
+    UpdateRelayConnection(
+        Connection::ConnectionPtr pConn
+    );
 
     void
     UpdateServerConnections(
@@ -323,11 +332,6 @@ public:
     void
     Update(
         uint32_t ms_elapsed
-    );
-
-    void
-    RemoveConnection(
-        uint32_t uid
     );
 
     void

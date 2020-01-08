@@ -15,6 +15,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Server00", "Server00\Server
 		{00486D5C-4465-48DF-8D37-32F88CD25F13} = {00486D5C-4465-48DF-8D37-32F88CD25F13}
 	EndProjectSection
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "MonkeyInTheMiddle", "MonkeyInTheMiddle\MonkeyInTheMiddle.vcxproj", "{A9D70ED9-E333-470E-973F-86BDC1CA3C72}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -47,6 +49,14 @@ Global
 		{457764AE-0397-4743-881A-AD4DF304EF0A}.Release|x64.Build.0 = Release|x64
 		{457764AE-0397-4743-881A-AD4DF304EF0A}.Release|x86.ActiveCfg = Release|Win32
 		{457764AE-0397-4743-881A-AD4DF304EF0A}.Release|x86.Build.0 = Release|Win32
+		{A9D70ED9-E333-470E-973F-86BDC1CA3C72}.Debug|x64.ActiveCfg = Debug|x64
+		{A9D70ED9-E333-470E-973F-86BDC1CA3C72}.Debug|x64.Build.0 = Debug|x64
+		{A9D70ED9-E333-470E-973F-86BDC1CA3C72}.Debug|x86.ActiveCfg = Debug|Win32
+		{A9D70ED9-E333-470E-973F-86BDC1CA3C72}.Debug|x86.Build.0 = Debug|Win32
+		{A9D70ED9-E333-470E-973F-86BDC1CA3C72}.Release|x64.ActiveCfg = Release|x64
+		{A9D70ED9-E333-470E-973F-86BDC1CA3C72}.Release|x64.Build.0 = Release|x64
+		{A9D70ED9-E333-470E-973F-86BDC1CA3C72}.Release|x86.ActiveCfg = Release|Win32
+		{A9D70ED9-E333-470E-973F-86BDC1CA3C72}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

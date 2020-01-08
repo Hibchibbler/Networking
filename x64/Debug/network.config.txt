@@ -2,4 +2,4 @@ heart_beat_ms=1000
 timeout_warning_ms=5000
 timeout_ms=6000
 ack_timeout_ms=500
-retry_count=12
+retry_count=4

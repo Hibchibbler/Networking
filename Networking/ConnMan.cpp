@@ -5,12 +5,12 @@
 namespace bali
 {
 
-#define BAD_NUMBER_A 9000       // client read
-#define BAD_NUMBER_B 9000       // server read
-#define BAD_NUMBER_C 9000       // all write
+#define BAD_NUMBER_A 1000       // client read
+#define BAD_NUMBER_B 1000       // server read
+#define BAD_NUMBER_C 1000       // all write
 
-#define BAD_NUMBER_D 10000      // read general & ack
-#define BAD_NUMBER_E 10000       // write General & Ack
+#define BAD_NUMBER_D 20000      // read general & ack
+#define BAD_NUMBER_E 20000       // write General & Ack
 
 #define SHOW_PING_PRINTS
 
@@ -47,7 +47,8 @@ ConnMan::Initialize(
     cmstate.onevent = onevent;
     cmstate.oneventcontext = oneventcontext;
 
-    if (cmstate.cmtype == ConnManState::ConnManType::SERVER)
+    if (cmstate.cmtype == ConnManState::ConnManType::SERVER ||
+        cmstate.cmtype == ConnManState::ConnManType::RELAY)
     {
         Network::initialize(cmstate.netstate, 8, thisport, ConnMan::ConnManServerIOHandler, this);
     }
@@ -192,39 +193,39 @@ ConnMan::UpdateConnection(
     Connection::ConnectionPtr pConn
 )
 {
-    //
-    // Send Pings
-    //
-    if (pConn->state == Connection::State::ALIVE)
-    {
-        duration d = clock::now() - pConn->heartbeat;
-        if (d.count() > cmstate.heart_beat_ms)
-        {
-            pConn->heartbeat = clock::now();
-            Packet packet = CreatePingPacket(pConn->who, pConn->id, pConn->curuseq, pConn->curack);
+    ////
+    //// Send Pings
+    ////
+    //if (pConn->state == Connection::State::ALIVE)
+    //{
+    //    duration d = clock::now() - pConn->heartbeat;
+    //    if (d.count() > cmstate.heart_beat_ms)
+    //    {
+    //        pConn->heartbeat = clock::now();
+    //        Packet packet = CreatePingPacket(pConn->who, pConn->id, pConn->curuseq, pConn->curack);
 
-            // When we recieve a Pong
-            // we will only be interested
-            // in ack's that match curpingseq/
-            // This implies one ping at a time,
-            // or heart_beat_ms > ack_timeout_ms
-            pConn->pingstart = clock::now();
-            pConn->curpingseq = GetPacketSequence(packet);
-            pConn->totalpings++;
-            RequestStatus status;
-            status.promise = std::make_shared<RequestPromise>();
-            status.seq = GetPacketSequence(packet);
-            status.starttime = clock::now();
-            status.endtime = clock::now();
-            status.state = RequestStatus::State::PENDING;
-            //future = status.promise->get_future();
-            status.packet = packet;
-            //request_index = status.seq;
-            pConn->AddRequestStatus(status, status.seq);
+    //        // When we recieve a Pong
+    //        // we will only be interested
+    //        // in ack's that match curpingseq/
+    //        // This implies one ping at a time,
+    //        // or heart_beat_ms > ack_timeout_ms
+    //        pConn->pingstart = clock::now();
+    //        pConn->curpingseq = GetPacketSequence(packet);
+    //        pConn->totalpings++;
+    //        RequestStatus status;
+    //        status.promise = std::make_shared<RequestPromise>();
+    //        status.seq = GetPacketSequence(packet);
+    //        status.starttime = clock::now();
+    //        status.endtime = clock::now();
+    //        status.state = RequestStatus::State::PENDING;
+    //        //future = status.promise->get_future();
+    //        status.packet = packet;
+    //        //request_index = status.seq;
+    //        pConn->AddRequestStatus(status, status.seq);
 
-            Write(packet);
-        }
-    } // If Alive
+    //        Write(packet);
+    //    }
+    //} // If Alive
 
     //
     // Process this connections pending Requests
@@ -266,7 +267,7 @@ ConnMan::UpdateConnection(
                     pReq->second.promise->set_value(RequestStatus::RequestResult::TIMEDOUT);
                 }
             }
-            else if (pReq->second.state == RequestStatus::State::SUCCEEDED)// Ping will never be this; as it will be removed on succeed.
+            else if (pReq->second.state == RequestStatus::State::ACKNOWLEDGED)// Ping will never be this; as it will be removed on succeed.
             {
                 pReq->second.state = RequestStatus::State::DYING;
                 cmstate.onevent(cmstate.oneventcontext,
@@ -298,6 +299,26 @@ ConnMan::UpdateConnection(
         }
     }
 }
+
+void
+ConnMan::UpdateRelayConnection(
+    Connection::ConnectionPtr pConn
+)
+{
+    //
+    // Service incoming packets
+    //
+    while (!pConn->rxpackets.empty())
+    {
+        Packet packet;
+        packet = pConn->rxpackets.front();
+        pConn->rxpackets.pop();
+
+        // Basically -- Process General....
+        // on.event(MESSAGE_RECEIVED);
+    }
+}
+
 void
 ConnMan::UpdateClientConnection(
     Connection::ConnectionPtr pConn
@@ -343,19 +364,6 @@ ConnMan::UpdateClientConnection(
                         nullptr);
         pConn->connectingresultpromise->set_value(Connection::ConnectingResult::DENIED);
     }
-
-
-    UpdateConnection(pConn);
-}
-
-Connection::State
-CompareExchange(
-    Connection::State* addr,
-    Connection::State now,
-    Connection::State was
-)
-{
-    return (Connection::State)InterlockedCompareExchange((uint32_t*)addr, (uint32_t)now, (uint32_t)was);
 }
 
 void
@@ -363,6 +371,39 @@ ConnMan::UpdateServerConnections(
     Connection::ConnectionPtr  pConn
 )
 {
+    //
+    // Send Pings
+    //
+    if (pConn->state == Connection::State::ALIVE)
+    {
+        duration d = clock::now() - pConn->heartbeat;
+        if (d.count() > cmstate.heart_beat_ms)
+        {
+            pConn->heartbeat = clock::now();
+            Packet packet = CreatePingPacket(pConn->who, pConn->id, pConn->curuseq, pConn->curack);
+
+            // When we recieve a Pong
+            // we will only be interested
+            // in ack's that match curpingseq/
+            // This implies one ping at a time,
+            // or heart_beat_ms > ack_timeout_ms
+            pConn->pingstart = clock::now();
+            pConn->curpingseq = GetPacketSequence(packet);
+            pConn->totalpings++;
+            RequestStatus status;
+            status.promise = std::make_shared<RequestPromise>();
+            status.seq = GetPacketSequence(packet);
+            status.starttime = clock::now();
+            status.endtime = clock::now();
+            status.state = RequestStatus::State::PENDING;
+            //future = status.promise->get_future();
+            status.packet = packet;
+            //request_index = status.seq;
+            pConn->AddRequestStatus(status, status.seq);
+
+            Write(packet);
+        }
+    } // If Alive
     if (pConn->state == Connection::State::IDENTIFIED)
     {
         pConn->state = Connection::State::GRANTED;
@@ -399,8 +440,6 @@ ConnMan::UpdateServerConnections(
                             nullptr);
         }
     }
-
-    UpdateConnection(pConn);
 }
 
 void
@@ -416,54 +455,58 @@ ConnMan::Update(
         Packet packet = cmstate.globalrxqueue.front();
         cmstate.globalrxqueue.pop();
 
-        uint32_t cid = GetConnectionId(packet);
+        uint32_t cid = ExtractConnectionIdFromPacket(packet);
         cmstate.connectionsmutex.lock();
         Connection::ConnectionPtr pConn = ConnMan::GetConnectionById(cmstate.connections, cid);
         cmstate.connectionsmutex.unlock();
 
-        if (pConn)
-        {
-            ////pConn->rxpacketmutex.lock();
-            //pConn->rxpackets.push(packet);
-            ////pConn->rxpacketmutex.unlock();
-
-            if (IsCode(packet, MESG::HEADER::Codes::Grant)) {
-                // C Identifying -> Gracking
-                ProcessGrant(pConn, packet);
+        if (cmstate.cmtype == ConnManState::ConnManType::CLIENT ||
+            cmstate.cmtype == ConnManState::ConnManType::SERVER)
+        {// Not Relay mode
+            if (pConn)
+            {
+                if (IsCode(packet, MESG::HEADER::Codes::Grant)) {
+                    // C Identifying -> Gracking
+                    ProcessGrant(pConn, packet);
+                }
+                if (IsCode(packet, MESG::HEADER::Codes::Deny)) {
+                    // C --> Identifying -> Denied
+                    ProcessDeny(pConn, packet);
+                }
+                if (IsCode(packet, MESG::HEADER::Codes::Grack)) {
+                    // S Gracking -> Alive
+                    ProcessGrack(pConn, packet);
+                }
+                if (IsCode(packet, MESG::HEADER::Codes::Disconnect)) {
+                    ProcessDisconnect(pConn);
+                }
+                if (IsCode(packet, MESG::HEADER::Codes::Ping)) {
+                    // Sends Pong
+                    ProcessPing(pConn, packet);
+                }
+                if (IsCode(packet, MESG::HEADER::Codes::Pong)) {
+                    // FInd request with seq that matches pong's ack
+                    // do some easy math, get rtt
+                    // remove pings' request from list.
+                    ProcessPong(pConn, packet);
+                }
+                if (IsCode(packet, MESG::HEADER::Codes::General)) {
+                    //TODO -- the goods. oh..
+                    ProcessGeneral(pConn, packet);
+                }
+                if (IsCode(packet, MESG::HEADER::Codes::Ack)) {
+                    // Request: PENDING -> SUCCEEDED
+                    ProcessAck(pConn, packet);
+                }
             }
-            if (IsCode(packet, MESG::HEADER::Codes::Deny)) {
-                // C --> Identifying -> Denied
-                ProcessDeny(pConn, packet);
-            }
-            if (IsCode(packet, MESG::HEADER::Codes::Grack)) {
-                // S Gracking -> Alive
-                ProcessGrack(pConn, packet);
-            }
-            if (IsCode(packet, MESG::HEADER::Codes::Disconnect)) {
-                ProcessDisconnect(pConn);
-            }
-            if (IsCode(packet, MESG::HEADER::Codes::Ping)) {
-                // Sends Pong
-                ProcessPing(pConn, packet);
-            }
-            if (IsCode(packet, MESG::HEADER::Codes::Pong)) {
-                // FInd request with seq that matches pong's ack
-                // do some easy math, get rtt
-                // remove pings' request from list.
-                ProcessPong(pConn, packet);
-            }
-            if (IsCode(packet, MESG::HEADER::Codes::General)) {
-                //TODO -- the goods. oh..
-                ProcessGeneral(pConn, packet);
-            }
-            if (IsCode(packet, MESG::HEADER::Codes::Ack)) {
-                // Request: PENDING -> SUCCEEDED
-                ProcessAck(pConn, packet);
+            else
+            {
+                std::cout << "Weird Packet From Weird Origin. Ignore.\n";
             }
         }
         else
-        {
-            std::cout << "Weird Packet From Weird Origin. Ignore.\n";
+        {// Relay Mode
+            pConn->rxpackets.push(packet);
         }
     }
     cmstate.globalrxmutex.unlock();
@@ -475,28 +518,35 @@ ConnMan::Update(
     cmstate.connectionsmutex.lock();
     for (auto& pConn : cmstate.connections)
     {
-        //
-        // Service incoming packets
-        //
-        //pConn->rxpacketmutex.lock();
-        while (!pConn->rxpackets.empty())
-        {
-            Packet packet;
-            packet = pConn->rxpackets.front();
-            pConn->rxpackets.pop();
+        ////
+        //// Service incoming packets
+        ////
+        //while (!pConn->rxpackets.empty())
+        //{
+        //    Packet packet;
+        //    packet = pConn->rxpackets.front();
+        //    pConn->rxpackets.pop();
 
-            // Basically -- Process General....
-            // on.event(MESSAGE_RECEIVED);
-        }
+        //    // Basically -- Process General....
+        //    // on.event(MESSAGE_RECEIVED);
+        //}
 
         if (cmstate.cmtype == ConnManState::ConnManType::SERVER)
         {
             UpdateServerConnections(pConn);
         }
-        else
+        else if(cmstate.cmtype == ConnManState::ConnManType::CLIENT)
         {
             UpdateClientConnection(pConn);
         }
+        else if (cmstate.cmtype == ConnManState::ConnManType::RELAY)
+        {
+            UpdateRelayConnection(pConn);
+        }
+        //
+        // Common update path
+        //
+        UpdateConnection(pConn);
     }
     //
     // Reap Dead Connections
@@ -506,24 +556,24 @@ ConnMan::Update(
 }
 
 void
-ConnMan::RemoveConnection(
+ConnManState::RemoveConnection(
     uint32_t uid
 )
 {
-    cmstate.connectionsmutex.lock();
+    connectionsmutex.lock();
     
-    for (auto pConn = cmstate.connections.begin();
-         pConn != cmstate.connections.end();
+    for (auto pConn = connections.begin();
+         pConn != connections.end();
          pConn++)
     {
         if ((*pConn)->id == uid)
         {
             std::cout << "Removing Connection: "<< (uint32_t)(*pConn)->state << "\n";
-            cmstate.connections.erase(pConn);
+            connections.erase(pConn);
             break;
         }
     }
-    cmstate.connectionsmutex.unlock();
+    connectionsmutex.unlock();
 }
 
 void
@@ -574,7 +624,7 @@ ConnMan::ProcessGrant(
     Packet& packet
 )
 {
-    uint32_t cid = GetConnectionId(packet);
+    uint32_t cid = ExtractConnectionIdFromPacket(packet);
     
     if (cid == pConn->id)
     {
@@ -619,7 +669,7 @@ ConnMan::ProcessDeny(
     Packet& packet
 )
 {
-    std::string playername = GetPlayerNameFromPacket(packet);
+    std::string playername = ExtractPlayerNameFromPacket(packet);
     if (playername == pConn->playername)
     {
         pConn->state = Connection::State::DENIED;
@@ -765,7 +815,7 @@ ConnMan::ProcessAck(
         {
             if (pReq->second.state == RequestStatus::State::PENDING)
             {
-                pReq->second.state = RequestStatus::State::SUCCEEDED;
+                pReq->second.state = RequestStatus::State::ACKNOWLEDGED;
                 InterlockedIncrement(&pConn->curseq);
                 pConn->lastrxtime = clock::now();
                 pReq->second.endtime = clock::now();
@@ -901,12 +951,12 @@ ConnMan::ProcessIdentify(
 {
     //if (cmstate.connections.size() < cmstate.numplayers)
     {
-        if (cmstate.gamename == GetGameName(request->packet))
+        if (cmstate.gamename == ExtractGameNameFromPacket(request->packet))
         {
-            if (cmstate.gamepass == GetGamePass(request->packet))
+            if (cmstate.gamepass == ExtractGamePassFromPacket(request->packet))
             {
-                std::string pn = GetPlayerNameFromPacket(request->packet);
-                uint16_t id = GetConnectionId(request->packet);
+                std::string pn = ExtractPlayerNameFromPacket(request->packet);
+                uint16_t id = ExtractConnectionIdFromPacket(request->packet);
                 Connection::ConnectionPtr pConn = nullptr;
                 //
                 cmstate.connectionsmutex.lock();
@@ -943,7 +993,7 @@ ConnMan::ProcessIdentify(
                     {
                         // Deny - password doesn't match
                         Packet packet = CreateDenyPacket(request->packet.address,
-                                                         GetPlayerNameFromPacket(request->packet));
+                                                         ExtractPlayerNameFromPacket(request->packet));
                         Write(packet);
                         std::cout << "Tx Deny: Lobby Full\n";
                     }
@@ -968,7 +1018,7 @@ ConnMan::ProcessIdentify(
             {
                 // Deny - password doesn't match
                 Packet packet = CreateDenyPacket(request->packet.address,
-                                                 GetPlayerNameFromPacket(request->packet));
+                                                 ExtractPlayerNameFromPacket(request->packet));
                 Write(packet);
                 std::cout << "Tx Deny: Password is bad\n";
             }
@@ -977,7 +1027,7 @@ ConnMan::ProcessIdentify(
         {
             // Deny - Game name doesn't match
             Packet packet = CreateDenyPacket(request->packet.address,
-                                             GetPlayerNameFromPacket(request->packet));
+                                             ExtractPlayerNameFromPacket(request->packet));
             //Network::write(cmstate.netstate, packet);
             Write(packet);
             std::cout << "Tx Deny: Game name is unknown\n";
@@ -1054,7 +1104,8 @@ ConnMan::ConnManServerIOHandler(
         {
             if (IsSizeValid(request->packet))
             {
-                if (IsCode(request->packet, MESG::HEADER::Codes::Identify))
+                if (IsCode(request->packet, MESG::HEADER::Codes::Identify) &&
+                    cm.cmstate.cmtype != ConnManState::ConnManType::RELAY)
                 {
                     // Rx'd an IDENTIFY packet.
                     // Therefore, an ID hasn't been

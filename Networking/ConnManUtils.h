@@ -107,12 +107,22 @@ static const char* CodeName[] = {
     "Pong"
 };
 
-//std::map<uint32_t, RequestStatus>::iterator
-//GetRequestStatus(
-//    Connection & connection,
-//    uint32_t index
-//);
-//
+Packet
+CreateDisconnectPacket(
+    Address to,
+    uint32_t id,
+    uint32_t& curseq,
+    uint32_t curack
+);
+
+Packet
+CreateGrackPacket(
+    Address to,
+    uint32_t id,
+    uint32_t& curseq,
+    uint32_t curack
+);
+
 Packet
 CreateGrantPacket(
     Address to,
@@ -191,27 +201,27 @@ IsSizeValid(
 );
 
 std::string
-GetPlayerNameFromPacket(
+ExtractPlayerNameFromPacket(
     Packet & packet
 );
 
 uint32_t
-GetConnectionId(
+ExtractConnectionIdFromPacket(
     Packet & packet
 );
 
 std::string
-GetGameName(
+ExtractGameNameFromPacket(
     Packet & packet
 );
 
 std::string
-GetGamePass(
+ExtractGamePassFromPacket(
     Packet & packet
 );
 
 uint32_t
-GetPacketSequence(
+ExtractSequenceFromPacket(
     Packet & packet
 );
 
@@ -231,22 +241,6 @@ Address
 CreateAddress(
     uint32_t port,
     const char* szIpv4
-);
-
-Packet
-CreateDisconnectPacket(
-    Address to,
-    uint32_t id,
-    uint32_t& curseq,
-    uint32_t curack
-);
-
-Packet
-CreateGrackPacket(
-    Address to,
-    uint32_t id,
-    uint32_t& curseq,
-    uint32_t curack
 );
 
 }

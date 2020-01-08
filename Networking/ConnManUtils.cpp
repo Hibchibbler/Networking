@@ -301,7 +301,7 @@ IsSizeValid(
 }
 
 uint32_t
-GetConnectionId(
+ExtractConnectionIdFromPacket(
     Packet & packet
 )
 {
@@ -350,13 +350,33 @@ PrintMsgHeader(
 }
 
 std::string
-GetPlayerNameFromPacket(
+ExtractPlayerNameFromPacket(
     Packet & packet
 )
 {
     MESG* pMsg = (MESG*)packet.buffer;
     return std::string(pMsg->payload.grant.playername,
         strlen(pMsg->payload.grant.playername));
+}
+
+std::string
+ExtractGameNameFromPacket(
+    Packet & packet
+)
+{
+    MESG* pMsg = (MESG*)packet.buffer;
+    return std::string(pMsg->payload.identify.gamename,
+                       strlen(pMsg->payload.identify.gamename));
+}
+
+std::string
+ExtractGamePassFromPacket(
+    Packet & packet
+)
+{
+    MESG* pMsg = (MESG*)packet.buffer;
+    return std::string(pMsg->payload.identify.gamepass,
+                       strlen(pMsg->payload.identify.gamepass));
 }
 
 void
@@ -386,34 +406,6 @@ CreateAddress(
     ((sockaddr_in*)&address.addr)->sin_addr.S_un.S_addr = inet_addr(szIpv4);
     return address;
 }
-
-std::string
-GetGameName(
-    Packet & packet
-)
-{
-    MESG* pMsg = (MESG*)packet.buffer;
-    return std::string(pMsg->payload.identify.gamename,
-        strlen(pMsg->payload.identify.gamename));
-}
-
-std::string
-GetGamePass(
-    Packet & packet
-)
-{
-    MESG* pMsg = (MESG*)packet.buffer;
-    return std::string(pMsg->payload.identify.gamepass,
-        strlen(pMsg->payload.identify.gamepass));
-}
-
-
-
-
-
-
-
-
 
 
 
