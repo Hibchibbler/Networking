@@ -23,7 +23,7 @@
     <ProjectGuid>{A9D70ED9-E333-470E-973F-86BDC1CA3C72}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
     <RootNamespace>MonkeyInTheMiddle</RootNamespace>
-    <WindowsTargetPlatformVersion>10.0.18362.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0.16299.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">

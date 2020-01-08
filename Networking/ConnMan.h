@@ -198,7 +198,7 @@ struct ConnManState
     enum class ConnManType {
         CLIENT,
         SERVER,
-        RELAY
+        PASS_THROUGH
     };
     enum class OnEventType {
         CONNECTION_HANDSHAKE_GRANTED,    // Server Side Event
@@ -221,6 +221,10 @@ struct ConnManState
     uint32_t                done;
 
     uint32_t                thisport;
+    //std::string             thisipv4;
+    //uint32_t                thatport;
+    //std::string             thatipv4;
+
     std::string             serveripv4;
     uint32_t                serverport;
 
@@ -307,8 +311,16 @@ public:
     );
 
     void
-    UpdateRelayConnection(
-        Connection::ConnectionPtr pConn
+    Initialize(
+        NetworkConfig & netcfg,
+        ConnManState::ConnManType cmtype,
+        uint32_t thisport,
+        ConnManState::OnEvent onevent,
+        void* oneventcontext
+    );
+
+    void
+        UpdateRelayMachine(
     );
 
     void

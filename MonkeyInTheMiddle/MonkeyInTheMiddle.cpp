@@ -9,32 +9,45 @@
 #include "Networking\ConnMan.h"
 #include "Networking\ConnManUtils.h"
 #include <vector>
+#include <deque>
 #include <chrono>
 #include <string>
-
+#include <chrono>
+#include <random>
 #include <windows.h>
 using namespace bali;
 
 struct SharedContext
 {
-    ConnMan* pConnMan;
+    ConnMan* pThisConnMan;
+    ConnMan* pThatConnMan;
 };
 
 bool gAbort = false;
 Thread gInputThread;
-ConnMan gConnMan;
+
+ConnMan gThisConnMan;
+ConnMan gThatConnMan;
 
 uint32_t requiredNumberOfPlayers = 3;
 std::string playerName = "JackA";
 std::string gameName = "Bali";
 std::string gamePass = "Bear";
 uint32_t thisport = 51002;
-uint32_t serverport = 51001;
-std::string serveripv4 = "10.0.0.93";
+std::string thisipv4 = "10.0.0.93";
+uint32_t thatport = 51003;
+std::string thatipv4 = "10.0.0.93";
 
-Address gToServer;
+Address gThisAddress;
+Address gThatAddress;
 SharedContext gSharedContext;
 
+Mutex amutex;
+Mutex bmutex;
+std::queue<Packet> gAPackets; // from this to that
+Address gAAddress;
+Address gBAddress;
+std::queue<Packet> gBPackets; // from that to this
 
 BOOL
 WINAPI
@@ -48,60 +61,84 @@ InputFunction(
 );
 
 void
-OnEvent(
+OnEventThis(
     void* oecontext,
     ConnManState::OnEventType t,
     Connection* pConn,
     Packet* packet
 );
 
+void
+OnEventThat(
+    void* oecontext,
+    ConnManState::OnEventType t,
+    Connection* pConn,
+    Packet* packet
+);
 
-struct SlabDescriptor
-{
-
-};
-SlabPool<SlabDescriptor> pendingwrites;
+std::deque<Packet> gADetoured;
+std::deque<Packet> gBDetoured;
 
 int main(int argc, char** argv)
 {
+
+    std::random_device rd;     // only used once to initialise (seed) engine
+    std::mt19937 rng(rd());    // random-number engine used (Mersenne-Twister in this case)
+    std::uniform_int_distribution<uint32_t> uni(1, 1000); // guaranteed unbiased
+
+    auto random_integer = uni(rng);
     //
     // Handle Ctrl-C 
     // Ctrl-C sets Abort = true
     //
     SetConsoleCtrlHandler(SignalFunction, TRUE);
 
+    amutex.create();
+    bmutex.create();
+
     //
     // Argument handling
     //
-    if (argc > 1)
+    if (argc == 4)
     {
         thisport = std::atol(argv[1]);
+        thatport = std::atol(argv[2]);
+        thatipv4 = std::string(argv[3]);
     }
     else
     {
-        std::cout << "Usage:\n\t" << argv[0] << "<serverport>\n";
+        std::cout << "Usage:\n\t" << argv[0] << " <thisport> <thatport> <thatipv4>\n";
         return 0;
     }
 
-    std::cout << "Server port: " << thisport << "\n";
+    std::cout << "This port: " << thisport << "\n";
+    std::cout << "This ipv4: " << thatipv4 << "\n";// weirdos
+    std::cout << "That port: " << thatport << "\n";
+    std::cout << "That ipv4: " << thatipv4 << "\n";
 
     //
     // Initialize ConnMan Server
     //
-    gSharedContext.pConnMan = &gConnMan;
-    std::cout << "Initializing ConnMan Server...\n";
+    gSharedContext.pThisConnMan = &gThisConnMan;
+    gSharedContext.pThatConnMan = &gThatConnMan;
+
+    std::cout << "Initializing ConnMan Relay...\n";
 
     NetworkConfig netcfg = LoadNetworkConfig("network.config.txt");
 
-    gConnMan.Initialize(netcfg,
-                        ConnManState::ConnManType::RELAY,
+    gThisConnMan.Initialize(netcfg,
+                        ConnManState::ConnManType::PASS_THROUGH,
                         thisport,
-                        requiredNumberOfPlayers,
-                        gameName,
-                        gamePass,
-                        OnEvent,
+                        OnEventThis,
                         &gSharedContext);
 
+    gThatConnMan.Initialize(netcfg,
+                        ConnManState::ConnManType::PASS_THROUGH,
+                        thisport + 1,
+                        OnEventThat,
+                        &gSharedContext);
+    gThisAddress = CreateAddress(thisport, thatipv4.c_str());//we're just pretending it's all on same ip
+    gThatAddress = CreateAddress(thatport, thatipv4.c_str());
     Sleep(60);
 
     //
@@ -114,8 +151,72 @@ int main(int argc, char** argv)
     //
     while (!gAbort)
     {
-        gConnMan.Update(1);
-        Sleep(0);
+        gThisConnMan.Update(1);
+        gThatConnMan.Update(1);
+
+        // From This to That
+        amutex.lock();
+        if (!gAPackets.empty())
+        {
+            Packet p = gAPackets.front();
+            gAPackets.pop();
+
+            random_integer = uni(rng);
+            if (random_integer >= 0 && random_integer < 500)
+            { 
+                p.address = gThatAddress;
+                gThatConnMan.Write(p);
+            }
+            else
+            {
+                //random_integer = uni(rng);
+                //if (random_integer >= 0 && random_integer < 500)
+                {
+                    std::cout << "Detoured !%$#@%$#\n";
+                    gADetoured.push_back(p);
+                }
+            }
+        }
+
+        random_integer = uni(rng);
+        if (random_integer >= 0 && random_integer < 10)
+        {
+            //while(gADetoured.size() > 3)
+            if (gADetoured.size() > 0)
+            {
+                std::cout << "Resume !%$#@%$#\n";
+                //std::random_shuffle(gADetoured.begin(), gADetoured.end());
+                //gADetoured.front().address = gThatAddress;
+                Packet p = gADetoured.front();
+                gADetoured.pop_front();
+                p.address = gThatAddress;
+                gThatConnMan.Write(p);
+
+            }
+        }
+        amutex.unlock();
+
+        // From That to This
+        bmutex.lock();
+        if (!gBPackets.empty())
+        {
+            Packet p = gBPackets.front();
+            gBPackets.pop();
+
+            random_integer = uni(rng);
+            if (random_integer > 0)
+            {
+                p.address = gAAddress;
+                gThisConnMan.Write(p);
+            }
+            else
+            {
+                std::cout << "That !%$#@%$#\n";
+            }
+        }
+        bmutex.unlock();
+
+        Sleep(10);
     }
 
     //
@@ -123,12 +224,13 @@ int main(int argc, char** argv)
     //
     WaitForSingleObject(gInputThread.handle, INFINITE);
 
-    gConnMan.Cleanup();
+    gThisConnMan.Cleanup();
+    gThatConnMan.Cleanup();
     return 0;
 }
 
 void
-OnEvent(
+OnEventThis(
     void* context,
     ConnManState::OnEventType t,
     Connection* pConn,
@@ -137,46 +239,50 @@ OnEvent(
 {
     static bool timeout_seen = false;
     SharedContext* pSharedContext = (SharedContext*)context;
-    ConnMan& cm = *pSharedContext->pConnMan;
+    ConnMan& cm = *pSharedContext->pThisConnMan;
 
     switch (t)
     {
     case ConnManState::OnEventType::MESSAGE_RECEIVED:
         std::cout << "MESSAGE_RECIEVED" << std::endl;
-        break;
-    case ConnManState::OnEventType::CONNECTION_TIMEOUT:
-        std::cout << "CONNECTION_TIMEOUT: " << std::endl;
-        break;
-    case ConnManState::OnEventType::MESSAGE_ACK_TIMEOUT: {
-        MESG * m = (MESG*)packet->buffer;
-        std::cout << "MESSAGE_ACK_TIMEOUT: " << CodeName[m->header.code] << std::endl;
-        break;
-    }case ConnManState::OnEventType::MESSAGE_ACK_RECEIVED: {
-        MESG* m = (MESG*)packet->buffer;
-        std::cout << "MESSAGE_ACK_RECEIVED: " << CodeName[m->header.code] << std::endl;
-        break;
-    }case ConnManState::OnEventType::CONNECTION_HANDSHAKE_GRANTED:
-        std::cout << "CONNECTION_HANDSHAKE_GRANTED: " << std::endl;
-        break;
-    case ConnManState::OnEventType::CONNECTION_HANDSHAKE_DENIED:
-        std::cout << "CONNECTION_HANDSHAKE_DENIED: " << std::endl;
-        break;
-    case ConnManState::OnEventType::CONNECTION_HANDSHAKE_TIMEOUT:
-        std::cout << "CONNECTION_HANDSHAKE_TIMEOUT: " << std::endl;
-        break;
-    case ConnManState::OnEventType::CONNECTION_HANDSHAKE_TIMEOUT_NOGRACK:
-        std::cout << "CONNECTION_HANDSHAKE_TIMEOUT_NOGRACK: " << std::endl;
+
+        gAAddress = packet->address;
+        amutex.lock();
+        gAPackets.push(*packet);
+        amutex.unlock(); 
         break;
     }
 }
+void
+OnEventThat(
+    void* context,
+    ConnManState::OnEventType t,
+    Connection* pConn,
+    Packet* packet
+)
+{
+    SharedContext* pSharedContext = (SharedContext*)context;
+    ConnMan& cm = *pSharedContext->pThisConnMan;
 
+    switch (t)
+    {
+    case ConnManState::OnEventType::MESSAGE_RECEIVED:
+        std::cout << "MESSAGE_RECIEVED" << std::endl;
+
+        gBAddress = packet->address;
+        bmutex.lock();
+        gBPackets.push(*packet);
+        bmutex.unlock();
+        break;
+    }
+}
 void
 InputFunction(
     void* context
 )
 {
     SharedContext* pSharedContext = (SharedContext*)context;
-    ConnMan& cm = *pSharedContext->pConnMan;
+    ConnMan& cm = *pSharedContext->pThatConnMan;
     std::string strinput;
     char input[64];
 
@@ -186,23 +292,7 @@ InputFunction(
         strinput = std::string(input, strlen(input));
         if (strinput == "p")
         {
-            Network::read(cm.cmstate.netstate);
-        }
-        else if (strinput == "rtt")
-        {
-            //Connection::ConnectionPtr pConn = ConnMan::GetConnectionById(cmstate.connectionsmutex, cmstate.connections, gMyUniqueId);
 
-            cm.cmstate.connectionsmutex.lock();
-            for (auto & c : cm.cmstate.connections)
-            {
-                std::cout << "Connection: " << c->id << std::endl;
-                std::cout << "     State: " << (uint32_t)c->state << std::endl;
-                std::cout << "  Fidelity: " << 100.f*((float)c->totalpongs / (float)c->totalpings) << std::endl;
-                std::cout << "     Pings: " << c->totalpings << std::endl;
-                std::cout << "  Cur Ping: " << c->curping << std::endl;
-                std::cout << "       Avg: " << c->avgping << std::endl;
-            }
-            cm.cmstate.connectionsmutex.unlock();
         }
 
         Sleep(0);
