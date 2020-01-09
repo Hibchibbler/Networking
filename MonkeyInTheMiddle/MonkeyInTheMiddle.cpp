@@ -1,13 +1,12 @@
 /////////////////////////////////////////////////////////////////////////////////
 //// Daniel J Ferguson
-//// 2019
+//// 2020
 /////////////////////////////////////////////////////////////////////////////////
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
 #include <iostream>
 #include <conio.h>
 
 #include "Networking\ConnMan.h"
-#include "Networking\ConnManUtils.h"
 #include <vector>
 #include <deque>
 #include <chrono>
@@ -215,8 +214,8 @@ int main(int argc, char** argv)
                         thisport + 1,
                         OnEventThat,
                         &gSharedContext);
-    gThisAddress = CreateAddress(thisport, thatipv4.c_str());//we're just pretending it's all on same ip
-    gThatAddress = CreateAddress(thatport, thatipv4.c_str());
+    gThisAddress = ConnMan::CreateAddress(thisport, thatipv4.c_str());//we're just pretending it's all on same ip
+    gThatAddress = ConnMan::CreateAddress(thatport, thatipv4.c_str());
     Sleep(60);
 
     //
@@ -234,58 +233,12 @@ int main(int argc, char** argv)
 
         // From This to That
         ProcessShenanigans(amutex,
-            gAPackets,
-            gADetoured,
-            gThatConnMan,
-            gThatAddress);
-        //amutex.lock();
-        //if (!gAPackets.empty())
-        //{
-        //    Packet p = gAPackets.front();
-        //    gAPackets.pop();
+                           gAPackets,
+                           gADetoured,
+                           gThatConnMan,
+                           gThatAddress);
 
-        //    random_integer = uni(rng);
-        //    if (random_integer >= 0 && random_integer < 800)
-        //    { 
-        //        p.address = gThatAddress;
-        //        gThatConnMan.Write(p);
-        //    }
-        //    else if (random_integer >= 800 && random_integer < 950)
-        //    {
-        //        std::cout << "Pause Packet\n";
-
-        //        // TODO: randomize expiry
-        //        PacketInfo newpi(clock::now() + std::chrono::milliseconds(uni(rng) % 1000));
-        //        newpi.packet = p;
-
-        //        gADetoured.push_back(newpi);
-        //    }
-        //    else
-        //    {
-        //        std::cout << "Dropped Packet\n";
-        //    }
-        //}
-
-        //auto iter = gADetoured.begin();
-        //while (iter != gADetoured.end())
-        //{
-        //    if (clock::now() >= iter->expiry)
-        //    {
-        //        std::cout << "Resume Packet\n";
-        //        PacketInfo pi = *iter;
-
-        //        pi.packet.address = gThatAddress;
-        //        gThatConnMan.Write(pi.packet);
-        //        iter = gADetoured.erase(iter);
-        //    }
-        //    else
-        //    {
-        //        iter++;
-        //    }
-        //}
-
-        //amutex.unlock();
-
+        // From That to This
         ProcessShenanigans(bmutex,
                            gBPackets,
                            gBDetoured,

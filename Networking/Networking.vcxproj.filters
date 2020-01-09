@@ -33,15 +33,9 @@
     <ClInclude Include="NetworkConfig.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="ConnManUtils.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ConnMan.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="CommMan.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Network.cpp">
@@ -51,9 +45,6 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="NetworkConfig.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="ConnManUtils.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

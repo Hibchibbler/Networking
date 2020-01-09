@@ -16,6 +16,102 @@
 using std::move;
 namespace bali
 {
+
+
+struct IDENTIFY
+{
+    char playername[16];
+    char gamename[16];
+    char gamepass[16];
+};
+
+struct GRANT
+{
+    char playername[16];
+};
+
+struct DENY
+{
+    char playername[16];
+};
+
+struct GENERAL
+{
+    uint8_t buffer[MAX_PACKET_SIZE - 128];
+};
+
+struct ACK
+{
+};
+
+struct PINGPONG
+{
+
+};
+
+struct DISCONNECT
+{
+
+};
+
+struct GRACK
+{
+
+};
+
+struct MESG
+{
+    struct HEADER
+    {
+        enum class Codes {
+            Identify,
+            Grant,
+            Grack,
+            Deny,
+            Disconnect,
+            General,
+            Ack,
+            Ping,
+            Pong
+        };
+
+        enum class Mode {
+            Reliable,
+            Unreliable
+        };
+        uint8_t magic[2];
+        uint8_t code;
+        uint8_t mode;
+        uint16_t id;
+        uint32_t seq;
+        uint32_t ack;
+
+    }header;
+
+    union {
+        IDENTIFY    identify;   // Client Rx
+        GRANT       grant;      // Server Rx
+        DENY        deny;       // Server Rx
+        GENERAL     general;    // Client Rx & Server Rx
+        ACK         ack;
+        PINGPONG    pingpong;
+        DISCONNECT  disconnect;
+        GRACK       grack;
+    }payload;
+};
+
+static const char* CodeName[] = {
+    "Identify",
+    "Grant",
+    "Grack",
+    "Deny",
+    "Disconnect",
+    "General",
+    "Ack",
+    "Ping",
+    "Pong"
+};
+
 typedef std::chrono::high_resolution_clock clock;
 typedef std::chrono::duration<float, std::milli> duration;
 struct RequestStatus
@@ -228,10 +324,6 @@ struct ConnManState
     uint32_t                done;
 
     uint32_t                thisport;
-    //std::string             thisipv4;
-    //uint32_t                thatport;
-    //std::string             thatipv4;
-
     std::string             serveripv4;
     uint32_t                serverport;
 
@@ -491,6 +583,199 @@ public:
 
     uint64_t
     ReadyCount(
+    );
+
+
+    static
+    void
+    Disconnect(
+        ConnMan & cm,
+        Address to,
+        uint32_t uid
+    );
+
+    static
+    bool
+    Connect(
+        ConnMan & cm,
+        Address to,
+        std::string playername,
+        std::string gamename,
+        std::string gamepass,
+        ConnectingResultFuture & result
+    );
+
+    static
+    bool 
+    SendUnreliable(
+        ConnMan & cm,
+        uint32_t uid,
+        const char* szString
+    );
+
+    static
+    bool
+    SendReliable(
+        ConnMan & cm,
+        uint32_t uid,
+        const char* szString
+    );
+
+    static
+    Packet
+    CreateDisconnectPacket(
+        Address to,
+        uint32_t id,
+        uint32_t& curseq,
+        uint32_t curack
+    );
+
+    static
+    Packet
+    CreateGrackPacket(
+        Address to,
+        uint32_t id,
+        uint32_t& curseq,
+        uint32_t curack
+    );
+
+    static
+    Packet
+    CreateGrantPacket(
+        Address to,
+        uint32_t id,
+        uint32_t& curseq,
+        uint32_t curack,
+        std::string playername
+    );
+
+    static
+    Packet
+    CreateDenyPacket(
+        Address to,
+        std::string playername
+    );
+
+    static
+    Packet
+    CreateAckPacket(
+        Address& to,
+        uint32_t id,
+        uint32_t& curseq,
+        uint32_t ack
+    );
+
+
+    static
+    Packet
+    CreatePingPacket(
+        Address& to,
+        uint32_t id,
+        uint32_t& curseq,
+        uint32_t curack
+    );
+
+    static
+    Packet
+    CreatePongPacket(
+        Address& to,
+        uint32_t id,
+        uint32_t& curseq,
+        uint32_t ack
+    );
+
+    static
+    Packet
+    CreateIdentifyPacket(
+        Address& to,
+        std::string playername,
+        uint32_t& curseq,
+        uint32_t curack,
+        uint32_t randomcode,
+        std::string gamename,
+        std::string gamepass
+    );
+
+    static
+    void
+    AddMagic(
+        MESG* pMsg
+    );
+
+    static
+    uint32_t
+    SizeofPayload(
+        MESG::HEADER::Codes code
+    );
+
+    static
+    bool
+    IsCode(
+        Packet & packet,
+        MESG::HEADER::Codes code
+    );
+
+    static
+    bool
+    IsMagicGood(
+        Packet & packet
+    );
+
+    static
+    bool
+    IsSizeValid(
+        Packet & packet
+    );
+
+    static
+    std::string
+    ExtractPlayerNameFromPacket(
+        Packet & packet
+    );
+
+    static
+    uint32_t
+    ExtractConnectionIdFromPacket(
+        Packet & packet
+    );
+
+    static
+    std::string
+    ExtractGameNameFromPacket(
+        Packet & packet
+    );
+
+    static
+    std::string
+    ExtractGamePassFromPacket(
+        Packet & packet
+    );
+
+    static
+    uint32_t
+    ExtractSequenceFromPacket(
+        Packet & packet
+    );
+
+    static
+    void
+    PrintMsgHeader(
+        Packet & packet,
+        bool rx
+    );
+
+    static
+    void
+    PrintfMsg(
+        char* format,
+        ...
+    );
+
+    static
+    Address
+    CreateAddress(
+        uint32_t port,
+        const char* szIpv4
     );
 
 
