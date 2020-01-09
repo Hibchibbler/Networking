@@ -44,10 +44,31 @@ SharedContext gSharedContext;
 
 Mutex amutex;
 Mutex bmutex;
+struct PacketInfo
+{
+    PacketInfo()
+        :start(clock::now()), expiry(clock::now())
+    {
+    }
+
+    PacketInfo(clock::time_point futurerelative)
+        : start(clock::now()), expiry(futurerelative)
+    {
+    }
+
+    Packet packet;
+    clock::time_point start;
+    clock::time_point expiry;
+
+};
 std::queue<Packet> gAPackets; // from this to that
 Address gAAddress;
 Address gBAddress;
 std::queue<Packet> gBPackets; // from that to this
+
+std::list<PacketInfo> gADetoured;
+std::list<PacketInfo> gBDetoured;
+
 
 BOOL
 WINAPI
@@ -76,8 +97,65 @@ OnEventThat(
     Packet* packet
 );
 
-std::deque<Packet> gADetoured;
-std::deque<Packet> gBDetoured;
+void
+ProcessShenanigans(Mutex & mutex, std::queue<Packet> & packets, std::list<PacketInfo> & paused, ConnMan& cm, Address & address)
+{
+    std::random_device rd;     // only used once to initialise (seed) engine
+    std::mt19937 rng(rd());    // random-number engine used (Mersenne-Twister in this case)
+    std::uniform_int_distribution<uint32_t> uni(1, 1000); // guaranteed unbiased
+    // From That to This
+    mutex.lock();
+    if (!packets.empty())
+    {
+        Packet p = packets.front();
+        packets.pop();
+
+        auto random_integer = uni(rng);
+        if (random_integer >= 0 && random_integer < 850)
+        {
+            p.address = address;//gAAddress;
+            cm.Write(p);
+            std::cout << ".";
+        }
+        else if (random_integer >= 850 && random_integer < 950)
+        {
+            std::cout << "Pause\n";
+
+            // TODO: randomize expiry
+            PacketInfo newpi(clock::now() + std::chrono::milliseconds(uni(rng) % 1000));
+            newpi.packet = p;
+
+            paused.push_back(newpi);
+        }
+        else
+        {
+            std::cout << "Dropped\n";
+        }
+    }
+    if (paused.size() > 0)
+    {
+        auto iter = paused.begin();
+        while (iter != paused.end())
+        {
+            if (clock::now() >= iter->expiry)
+            {
+                std::cout << "Resume\n";
+                PacketInfo pi = *iter;
+
+                pi.packet.address = address;//gAAddress;
+                gThisConnMan.Write(pi.packet);
+                iter = paused.erase(iter);
+            }
+            else
+            {
+                iter++;
+            }
+        }
+
+
+    }
+    mutex.unlock();
+}
 
 int main(int argc, char** argv)
 {
@@ -155,66 +233,64 @@ int main(int argc, char** argv)
         gThatConnMan.Update(1);
 
         // From This to That
-        amutex.lock();
-        if (!gAPackets.empty())
-        {
-            Packet p = gAPackets.front();
-            gAPackets.pop();
+        ProcessShenanigans(amutex,
+            gAPackets,
+            gADetoured,
+            gThatConnMan,
+            gThatAddress);
+        //amutex.lock();
+        //if (!gAPackets.empty())
+        //{
+        //    Packet p = gAPackets.front();
+        //    gAPackets.pop();
 
-            random_integer = uni(rng);
-            if (random_integer >= 0 && random_integer < 500)
-            { 
-                p.address = gThatAddress;
-                gThatConnMan.Write(p);
-            }
-            else
-            {
-                //random_integer = uni(rng);
-                //if (random_integer >= 0 && random_integer < 500)
-                {
-                    std::cout << "Detoured !%$#@%$#\n";
-                    gADetoured.push_back(p);
-                }
-            }
-        }
+        //    random_integer = uni(rng);
+        //    if (random_integer >= 0 && random_integer < 800)
+        //    { 
+        //        p.address = gThatAddress;
+        //        gThatConnMan.Write(p);
+        //    }
+        //    else if (random_integer >= 800 && random_integer < 950)
+        //    {
+        //        std::cout << "Pause Packet\n";
 
-        random_integer = uni(rng);
-        if (random_integer >= 0 && random_integer < 10)
-        {
-            //while(gADetoured.size() > 3)
-            if (gADetoured.size() > 0)
-            {
-                std::cout << "Resume !%$#@%$#\n";
-                //std::random_shuffle(gADetoured.begin(), gADetoured.end());
-                //gADetoured.front().address = gThatAddress;
-                Packet p = gADetoured.front();
-                gADetoured.pop_front();
-                p.address = gThatAddress;
-                gThatConnMan.Write(p);
+        //        // TODO: randomize expiry
+        //        PacketInfo newpi(clock::now() + std::chrono::milliseconds(uni(rng) % 1000));
+        //        newpi.packet = p;
 
-            }
-        }
-        amutex.unlock();
+        //        gADetoured.push_back(newpi);
+        //    }
+        //    else
+        //    {
+        //        std::cout << "Dropped Packet\n";
+        //    }
+        //}
 
-        // From That to This
-        bmutex.lock();
-        if (!gBPackets.empty())
-        {
-            Packet p = gBPackets.front();
-            gBPackets.pop();
+        //auto iter = gADetoured.begin();
+        //while (iter != gADetoured.end())
+        //{
+        //    if (clock::now() >= iter->expiry)
+        //    {
+        //        std::cout << "Resume Packet\n";
+        //        PacketInfo pi = *iter;
 
-            random_integer = uni(rng);
-            if (random_integer > 0)
-            {
-                p.address = gAAddress;
-                gThisConnMan.Write(p);
-            }
-            else
-            {
-                std::cout << "That !%$#@%$#\n";
-            }
-        }
-        bmutex.unlock();
+        //        pi.packet.address = gThatAddress;
+        //        gThatConnMan.Write(pi.packet);
+        //        iter = gADetoured.erase(iter);
+        //    }
+        //    else
+        //    {
+        //        iter++;
+        //    }
+        //}
+
+        //amutex.unlock();
+
+        ProcessShenanigans(bmutex,
+                           gBPackets,
+                           gBDetoured,
+                           gThisConnMan,
+                           gAAddress);
 
         Sleep(10);
     }
@@ -244,8 +320,6 @@ OnEventThis(
     switch (t)
     {
     case ConnManState::OnEventType::MESSAGE_RECEIVED:
-        std::cout << "MESSAGE_RECIEVED" << std::endl;
-
         gAAddress = packet->address;
         amutex.lock();
         gAPackets.push(*packet);
@@ -267,8 +341,6 @@ OnEventThat(
     switch (t)
     {
     case ConnManState::OnEventType::MESSAGE_RECEIVED:
-        std::cout << "MESSAGE_RECIEVED" << std::endl;
-
         gBAddress = packet->address;
         bmutex.lock();
         gBPackets.push(*packet);

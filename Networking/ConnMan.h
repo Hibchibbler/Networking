@@ -66,11 +66,18 @@ public:
         LOCAL
     };
 
-    enum class ConnectingResult {
+    enum class ConnectingResultCode {
         GRANTED,
         DENIED,
         TIMEDOUT
     };
+
+    struct ConnectingResult {
+        ConnectingResultCode code;
+        uint32_t id;
+    };
+
+    
 
 
     enum class State {
@@ -99,12 +106,12 @@ public:
         // because we have not yet been GRANTed
         id = uid;
         state = initstate;
-        curseq = 0;
+        curseq = uid % 256;
         curack = 0;
-        highseq = 0;
-        curuseq = 0;
+        highseq = uid % 256;
+        curuseq = uid % 128;
         curuack = 0;
-        highuseq = 0;
+        highuseq = uid % 128;
         lastrxtime = clock::now();
         lasttxtime = clock::now();
 

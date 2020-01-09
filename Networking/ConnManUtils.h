@@ -106,6 +106,44 @@ static const char* CodeName[] = {
     "Ping",
     "Pong"
 };
+void
+Disconnect(
+    ConnMan & cm,
+    Address to,
+    uint32_t uid
+)
+{
+    uint32_t cs = 13;
+    Packet packet = 
+        CreateDisconnectPacket(to,
+                               uid,
+                               cs,
+                               13);
+    cm.Write(packet);
+    cm.cmstate.RemoveConnection(uid);
+}
+
+bool
+Connect(
+    ConnMan & cm,
+    Address to,
+    std::string playername,
+    std::string gamename,
+    std::string gamepass,
+    ConnectingResultFuture & result
+);
+
+bool SendUnreliable(
+    ConnMan & cm,
+    uint32_t uid,
+    const char* szString
+);
+
+bool SendReliable(
+    ConnMan & cm,
+    uint32_t uid,
+    const char* szString
+);
 
 Packet
 CreateDisconnectPacket(

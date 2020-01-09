@@ -12,7 +12,7 @@ namespace bali
 #define BAD_NUMBER_D 20000      // read general & ack
 #define BAD_NUMBER_E 20000       // write General & Ack
 
-#define SHOW_PING_PRINTS
+//#define SHOW_PING_PRINTS
 
 void
 ConnMan::Initialize(
@@ -386,7 +386,10 @@ ConnMan::UpdateClientConnection(
                             ConnManState::OnEventType::CONNECTION_HANDSHAKE_TIMEOUT,
                             nullptr,
                             nullptr);
-            pConn->connectingresultpromise->set_value(Connection::ConnectingResult::TIMEDOUT);
+
+            Connection::ConnectingResult cr;
+            cr.code = Connection::ConnectingResultCode::TIMEDOUT;
+            pConn->connectingresultpromise->set_value(cr);
         }
     }
 
@@ -403,7 +406,10 @@ ConnMan::UpdateClientConnection(
                         ConnManState::OnEventType::CONNECTION_HANDSHAKE_GRANTED,
                         nullptr,
                         nullptr);
-        pConn->connectingresultpromise->set_value(Connection::ConnectingResult::GRANTED);
+        Connection::ConnectingResult cr;
+        cr.code = Connection::ConnectingResultCode::GRANTED;
+        cr.id = pConn->id;
+        pConn->connectingresultpromise->set_value(cr);
     }
 
 
@@ -414,7 +420,10 @@ ConnMan::UpdateClientConnection(
                         ConnManState::OnEventType::CONNECTION_HANDSHAKE_DENIED,
                         nullptr,
                         nullptr);
-        pConn->connectingresultpromise->set_value(Connection::ConnectingResult::DENIED);
+
+        Connection::ConnectingResult cr;
+        cr.code = Connection::ConnectingResultCode::DENIED;
+        pConn->connectingresultpromise->set_value(cr);
     }
 }
 
@@ -858,58 +867,26 @@ ConnMan::ConnManClientIOHandler(
     bali::Network::Result result(bali::Network::ResultType::SUCCESS);
     ConnMan& cm = *((ConnMan*)cm_);
 
-    std::random_device rd;     // only used once to initialise (seed) engine
-    std::mt19937 rng(rd());    // random-number engine used (Mersenne-Twister in this case)
-    std::uniform_int_distribution<uint32_t> uni(1, 65536); // guaranteed unbiased
-                                                           // HACK FUZZ
-
     if (request->ioType == Request::IOType::READ)
     {
         Network::read(cm.cmstate.netstate);
-        // HACK FUZZ BUG INJECTION/////////////////
-        auto random_integer = uni(rng);
-        MESG* m = (MESG*)request->packet.buffer;
-        /*if ((m->header.code == (uint32_t)MESG::HEADER::Codes::General ||
-            m->header.code == (uint32_t)MESG::HEADER::Codes::Ack) &&
-            random_integer < BAD_NUMBER_D)
-        {
-            std::cout << "#?%$ Rx: "
-                      << CodeName[m->header.code]
-                      << "[" << m->header.id << "]"
-                      << "[" << m->header.seq << "]"
-                      << "[" << m->header.ack << "]" << std::endl;
-            return;
-        }
-        if (random_integer < BAD_NUMBER_A)
-        {
-            if (request->ioType == Request::IOType::READ)
-            {
-                std::cout << "!?#$ Rx: "
-                          << CodeName[m->header.code]
-                          << "[" << m->header.id << "]"
-                          << "[" << m->header.seq << "]"
-                          << "[" << m->header.ack << "]" << std::endl;
-            }
-            return;
-        }*/
-        ///////////////////////////////////////////
-        /*MESG**/ m = (MESG*)request->packet.buffer;
-#ifndef SHOW_PING_PRINTS
-        if (m->header.code != (uint32_t)MESG::HEADER::Codes::Ping &&
-            m->header.code != (uint32_t)MESG::HEADER::Codes::Pong)
-#endif
-        {
-            std::cout << "     Rx: "
-                      << CodeName[m->header.code]
-                      << "[" << m->header.id << "]"
-                      << "[" << m->header.seq << "]"
-                      << "[" << m->header.ack << "]" << std::endl;
-        }
-
         if (IsMagicGood(request->packet))
         {
             if (IsSizeValid(request->packet))
             {
+#ifndef SHOW_PING_PRINTS
+                MESG* m = (MESG*)request->packet.buffer;
+                if (m->header.code != (uint32_t)MESG::HEADER::Codes::Ping &&
+                    m->header.code != (uint32_t)MESG::HEADER::Codes::Pong)
+#endif
+                {
+                    std::cout << "     Rx: "
+                        << CodeName[m->header.code]
+                        << "[" << m->header.id << "]"
+                        << "[" << m->header.seq << "]"
+                        << "[" << m->header.ack << "]" << std::endl;
+                }
+
                 cm.ProcessRxPacket(request->packet);
             }
             else
@@ -1051,52 +1028,9 @@ ConnMan::ConnManServerIOHandler(
     bali::Network::Result result(bali::Network::ResultType::SUCCESS);
     ConnMan& cm = *((ConnMan*)cm_);
 
-    std::random_device rd;     // only used once to initialise (seed) engine
-    std::mt19937 rng(rd());    // random-number engine used (Mersenne-Twister in this case)
-    std::uniform_int_distribution<uint32_t> uni(1, 65536); // guaranteed unbiased
-                                                           // HACK FUZZ
-
     if (request->ioType == Request::IOType::READ)
     {
         Network::read(cm.cmstate.netstate);
-        // HACK FUZZ BUG INJECTION/////////////////
-        auto random_integer = uni(rng);
-        MESG* m = (MESG*)request->packet.buffer;
-        /*if ((m->header.code == (uint32_t)MESG::HEADER::Codes::General ||
-            m->header.code == (uint32_t)MESG::HEADER::Codes::Ack) &&
-            random_integer < BAD_NUMBER_D)
-        {
-            std::cout << "#?%$ Rx: "
-                      << CodeName[m->header.code]
-                      << "[" << m->header.id << "]"
-                      << "[" << m->header.seq << "]"
-                      << "[" << m->header.ack << "]"
-                      << std::endl;
-            return;
-        }
-        if (random_integer < BAD_NUMBER_B)
-        {
-            if (request->ioType == Request::IOType::READ)
-            {
-                std::cout << "!?#$ Rx: "
-                          << CodeName[m->header.code]
-                          << "[" << m->header.id << "]"
-                          << "[" << m->header.seq << "]"
-                          << "[" << m->header.ack << "]"
-                          << std::endl;
-            }
-            return;
-        }*/
-        ///////////////////////////////////////////
-        /*MESG**/ m = (MESG*)request->packet.buffer;
-#ifndef SHOW_PING_PRINTS
-        if (m->header.code != (uint32_t)MESG::HEADER::Codes::Ping &&
-            m->header.code != (uint32_t)MESG::HEADER::Codes::Pong)
-#endif
-        {
-            std::cout << "     Rx: " << CodeName[m->header.code] << "[" << m->header.id << "]" << "[" << m->header.seq << "]" << "[" << m->header.ack << "]" << std::endl;
-        }
-
         /*
             If we recieve an Identify packet,
             and we are accepting more players,
@@ -1111,6 +1045,18 @@ ConnMan::ConnManServerIOHandler(
         {
             if (IsSizeValid(request->packet))
             {
+#ifndef SHOW_PING_PRINTS
+                MESG* m = (MESG*)request->packet.buffer;
+                if (m->header.code != (uint32_t)MESG::HEADER::Codes::Ping &&
+                    m->header.code != (uint32_t)MESG::HEADER::Codes::Pong)
+#endif
+                {
+                    std::cout << "     Rx: "
+                              << CodeName[m->header.code]
+                              << "[" << m->header.id << "]"
+                              << "[" << m->header.seq << "]"
+                              << "[" << m->header.ack << "]" << std::endl;
+                }
                 if (IsCode(request->packet, MESG::HEADER::Codes::Identify) &&
                     cm.cmstate.cmtype != ConnManState::ConnManType::PASS_THROUGH)
                 {

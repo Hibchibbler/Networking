@@ -1,8 +1,124 @@
 #include "ConnManUtils.h"
-
+#include <random>
 namespace bali
 {
 
+bool SendUnreliable(
+    ConnMan & cm,
+    uint32_t uid,
+    const char* szString
+)
+{
+    bool ret = false;
+    Connection::ConnectionPtr pConn = ConnMan::GetConnectionById(cm.cmstate.connectionsmutex, cm.cmstate.connections, uid);
+    if (pConn != nullptr)
+    {
+        uint32_t request_index; // not used for unreliable
+        cm.SendBuffer(pConn,
+                      ConnMan::SendType::WITHOUTRECEIPT,
+                      (uint8_t*)szString,
+                      strlen(szString),
+                      request_index);
+        ret = true;
+    }
+    return ret;
+}
+
+bool SendReliable(
+    ConnMan & cm,
+    uint32_t uid,
+    const char* szString
+)
+{
+    bool ret = false;
+    Connection::ConnectionPtr pConn = ConnMan::GetConnectionById(cm.cmstate.connectionsmutex, cm.cmstate.connections, uid);
+    if (pConn != nullptr)
+    {
+        uint32_t curRetries = 0;
+        bool sent = false;
+        do
+        {
+            uint32_t request_index;
+            RequestFuture barrier_future;
+
+            barrier_future =
+                cm.SendBuffer(pConn,
+                              ConnMan::SendType::WITHRECEIPT,
+                              (uint8_t*)szString,
+                              strlen(szString),
+                              request_index);
+
+            RequestStatus::RequestResult result = barrier_future.get();
+            if (result == RequestStatus::RequestResult::ACKNOWLEDGED)
+            {
+                sent = true;
+            }
+            else if (result == RequestStatus::RequestResult::TIMEDOUT)
+            {
+                // Retry
+            }
+            pConn->RemoveRequestStatus(request_index);
+            curRetries++;
+        } while (!sent && (curRetries < cm.cmstate.retry_count));
+
+        if (sent){
+            std::cout << "SendReliable Success. Tries: "<< curRetries << "\n";
+            ret = true;
+        }else
+        {
+            std::cout << "SendReliable Failed. Tries: " << curRetries << "\n";
+        }
+    }
+    else
+    {
+        std::cout << "SendReliable(): Unknown UID: "<< uid <<"\n";
+    }
+    return ret;
+}
+
+bool
+Connect(
+    ConnMan & cm,
+    Address to,
+    std::string playername,
+    std::string gamename,
+    std::string gamepass,
+    ConnectingResultFuture & result
+)
+{
+    bool ret = false;
+    std::random_device rd;     // only used once to initialise (seed) engine
+    std::mt19937 rng(rd());    // random-number engine used (Mersenne-Twister in this case)
+    std::uniform_int_distribution<uint32_t> uni(1, 65536); // guaranteed unbiased
+
+    auto rando = uni(rng);
+    Connection::ConnectionPtr pConn =
+        cm.cmstate.CreateConnection(
+            to,
+            playername,
+            rando,
+            Connection::Locality::LOCAL,
+            Connection::State::IDENTIFIED);
+    if (pConn != nullptr)
+    {
+        pConn->connectingresultpromise = std::make_shared<ConnectingResultPromise>();
+        cm.cmstate.AddConnection(pConn);
+
+        ConnectingResultFuture connectingResultFuture = 
+            pConn->connectingresultpromise->get_future();
+
+        Packet packet = CreateIdentifyPacket(pConn->who,
+                                             pConn->playername,
+                                             pConn->curuseq,
+                                             pConn->curack,
+                                             rando,
+                                             gamename, gamepass);
+        cm.Write(packet);
+        result = std::move(connectingResultFuture);
+        ret = true;
+    }
+    return ret;
+}
 
 Packet
 CreateIdentifyPacket(
@@ -288,7 +404,6 @@ IsSizeValid(
     Packet & packet
 )
 {
-
     bool ret = false;
     MESG* RxMsg = (MESG*)packet.buffer;
 
