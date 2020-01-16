@@ -156,7 +156,6 @@
     <ClInclude Include="ConnMan.h" />
     <ClInclude Include="Network.h" />
     <ClInclude Include="NetworkConfig.h" />
-    <ClInclude Include="SlabPool.h" />
     <ClInclude Include="targetver.h" />
   </ItemGroup>
   <ItemGroup>

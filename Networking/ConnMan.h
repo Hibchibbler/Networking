@@ -318,7 +318,7 @@ struct ConnManState
         NOTIFICATION_WARNING,
         NOTIFICATION_ERROR
     };
-    typedef void(*OnEvent)(void* oecontext, OnEventType t, Connection* conn, Packet* packet);
+    typedef void(*OnEvent)(void* oecontext, OnEventType t, uint32_t uid, Packet* packet);
     ConnManType             cmtype;
     uint64_t                timeticks;
     uint32_t                done;

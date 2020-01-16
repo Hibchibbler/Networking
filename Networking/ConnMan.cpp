@@ -281,7 +281,7 @@ ConnMan::UpdateConnection(
                     pReq->second.endtime = clock::now();
                     cmstate.onevent(cmstate.oneventcontext,
                         ConnManState::OnEventType::MESSAGE_ACK_TIMEOUT,
-                        nullptr,
+                        pConn->id,
                         &pReq->second.packet);
                     pReq->second.promise->set_value(RequestStatus::RequestResult::TIMEDOUT);
                 }
@@ -291,7 +291,7 @@ ConnMan::UpdateConnection(
                 pReq->second.state = RequestStatus::State::DYING;
                 cmstate.onevent(cmstate.oneventcontext,
                                 ConnManState::OnEventType::MESSAGE_ACK_RECEIVED,
-                                nullptr,
+                                pConn->id,
                                 &pReq->second.packet);
                 pReq->second.promise->set_value(RequestStatus::RequestResult::ACKNOWLEDGED);
             }
@@ -313,7 +313,7 @@ ConnMan::UpdateConnection(
             pConn->state = Connection::State::DEAD;
             cmstate.onevent(cmstate.oneventcontext,
                             ConnManState::OnEventType::CONNECTION_TIMEOUT,
-                            nullptr,
+                            pConn->id,
                             nullptr);
         }
     }
@@ -336,7 +336,7 @@ ConnMan::UpdateRelayMachine(
         // on.event(MESSAGE_RECEIVED);
         cmstate.onevent(cmstate.oneventcontext,
                         ConnManState::OnEventType::MESSAGE_RECEIVED,
-                        nullptr,
+                        0,
                         &packet);
     }
 }
@@ -354,7 +354,7 @@ ConnMan::UpdateClientConnection(
             pConn->state = Connection::State::DYING;
             cmstate.onevent(cmstate.oneventcontext,
                             ConnManState::OnEventType::CONNECTION_HANDSHAKE_TIMEOUT,
-                            nullptr,
+                            pConn->id,
                             nullptr);
 
             Connection::ConnectingResult cr;
@@ -374,7 +374,7 @@ ConnMan::UpdateClientConnection(
 
         cmstate.onevent(cmstate.oneventcontext,
                         ConnManState::OnEventType::CONNECTION_HANDSHAKE_GRANTED,
-                        nullptr,
+                        pConn->id,
                         nullptr);
         Connection::ConnectingResult cr;
         cr.code = Connection::ConnectingResultCode::GRANTED;
@@ -388,7 +388,7 @@ ConnMan::UpdateClientConnection(
         pConn->state = Connection::State::DYING;
         cmstate.onevent(cmstate.oneventcontext,
                         ConnManState::OnEventType::CONNECTION_HANDSHAKE_DENIED,
-                        nullptr,
+                        pConn->id,
                         nullptr);
 
         Connection::ConnectingResult cr;
@@ -420,21 +420,23 @@ ConnMan::UpdateServerConnections(
         // Now we are left to wait for the Grack from Client
         cmstate.onevent(cmstate.oneventcontext,
                         ConnManState::OnEventType::CONNECTION_HANDSHAKE_GRANTED,
-                        nullptr,
+                        pConn->id,
                         nullptr);
     }
 
     if (pConn->state == Connection::State::GRACKING)
-    {// We transition out of this state if
-     // A) we don't see a grack for timeout_ms (transitioned here)
-     // B) or, we receive Pings and/or General packets. (transistioned in ProcessPing() and ProcessGeneral())
+    {// We transition from Gracking to:
+     //   A) Dead - If we don't see a grack for timeout_ms (transitioned here)
+     //   B) Alive - If we get a Ping packet
+     //   C) Alive - If we get a General packet
+     //   D) Alive - If we get a Grack packet
         duration d2 = clock::now() - pConn->lastrxtime;
         if (d2.count() > cmstate.timeout_ms)
         {
             pConn->state = Connection::State::DEAD;
             cmstate.onevent(cmstate.oneventcontext,
                             ConnManState::OnEventType::CONNECTION_HANDSHAKE_TIMEOUT_NOGRACK,
-                            nullptr,
+                            pConn->id,
                             nullptr);
         }
     }
@@ -679,6 +681,13 @@ ConnMan::ProcessPing(
         Packet packet = CreatePongPacket(pConn->who, pConn->id, pConn->curuseq, msg->header.seq);
         pConn->lastrxtime = clock::now();
         pConn->curack = ConnMan::ExtractSequenceFromPacket(packet);
+
+        // Receiving Ping packets are as good as receiving Grack.
+        // If still Gracking, be Alive.
+        if (pConn->state == Connection::State::GRACKING)
+        {
+            pConn->state = Connection::State::ALIVE;
+        }
         Write(packet);
     }
 }
@@ -762,9 +771,14 @@ ConnMan::ProcessGeneral(
 {
     if (pConn)
     {
-        //pConn->rxpacketmutex.lock();
+        // Receiving General packets are as good as receiving Grack.
+        // If still Gracking, be Alive.
+        if (pConn->state == Connection::State::GRACKING)
+        {
+            pConn->state = Connection::State::ALIVE;
+        }
         pConn->rxpackets.push(packet);
-        //pConn->rxpacketmutex.unlock();
+
         pConn->lastrxtime = clock::now();
         pConn->curack = ConnMan::ExtractSequenceFromPacket(packet);
         /*

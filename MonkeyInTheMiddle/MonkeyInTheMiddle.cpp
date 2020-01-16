@@ -84,7 +84,7 @@ void
 OnEventThis(
     void* oecontext,
     ConnManState::OnEventType t,
-    Connection* pConn,
+    uint32_t uid,
     Packet* packet
 );
 
@@ -92,7 +92,7 @@ void
 OnEventThat(
     void* oecontext,
     ConnManState::OnEventType t,
-    Connection* pConn,
+    uint32_t uid,
     Packet* packet
 );
 
@@ -262,7 +262,7 @@ void
 OnEventThis(
     void* context,
     ConnManState::OnEventType t,
-    Connection* pConn,
+    uint32_t uid,
     Packet* packet
 )
 {
@@ -284,7 +284,7 @@ void
 OnEventThat(
     void* context,
     ConnManState::OnEventType t,
-    Connection* pConn,
+    uint32_t uid,
     Packet* packet
 )
 {
