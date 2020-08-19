@@ -118,6 +118,7 @@ Network::Result Network::startWorkerThreads(NetworkState& netstate)
             result.code = GetLastError();
             break;
         }
+        Sleep(100);
         t->started = true;
     }
 
@@ -168,6 +169,10 @@ Network::Result Network::createSocket(Socket & s, ULONG_PTR completionKey)
     {
         s.completionKey = completionKey;
         ZeroMemory(&s.local, sizeof(s.local));
+
+        // HACKing
+        char enable = 1;
+        setsockopt(s.handle, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable));
     }
     else
     {
@@ -180,10 +185,11 @@ Network::Result Network::createSocket(Socket & s, ULONG_PTR completionKey)
 Network::Result Network::bindSocket(NetworkState& netstate)
 {
     Network::Result result(Network::ResultType::SUCCESS);
-    Network::GetLocalAddressInfo(netstate, netstate.socket);
+    //Network::GetLocalAddressInfo(netstate, netstate.socket);
 
-    //((sockaddr_in*)&netstate.socket.local.addr)->sin_family = AF_INET;
-    //((sockaddr_in*)&netstate.socket.local.addr)->sin_addr.S_un.S_addr = inet_addr("10.0.0.93");
+    memset(&netstate.socket.local.addr, 0, sizeof(netstate.socket.local.addr));
+    ((sockaddr_in*)&netstate.socket.local.addr)->sin_family = AF_INET;
+    ((sockaddr_in*)&netstate.socket.local.addr)->sin_addr.S_un.S_addr = htonl(INADDR_ANY);// inet_addr("10.0.0.93");
     ((sockaddr_in*)&netstate.socket.local.addr)->sin_port = htons(netstate.port);
 
     int ret = bind(netstate.socket.handle, (SOCKADDR*)&netstate.socket.local.addr, sizeof(netstate.socket.local.addr));
@@ -292,8 +298,8 @@ Network::Result Network::read(NetworkState& netstate)
     if (netstate.socket.overlapPool.acquire(&req))
     {
         Network::InitializeReadRequest(req);
-
-        DWORD flags = 0;
+        //req->wsabuf.len = 0;
+        DWORD flags = 0;// MSG_PEEK;
         int ret = 0;
         ret =
             WSARecvFrom(netstate.socket.handle,
@@ -347,9 +353,11 @@ void* Network::WorkerThread(NetworkState* netstate)
 
     uint64_t tid = InterlockedIncrement(&netstate->threadidmax);
     bool done = false;
+    std::cout << "Worker Thread [" << tid << "] is Starting up.\n";
     while (!done)
     {
         BOOL ret = GetQueuedCompletionStatus(netstate->ioPort, &bytesTrans, &ckey, (LPOVERLAPPED*)&pOver, INFINITE);
+
         if (ret == TRUE)
         {// Ok
             if (ckey == COMPLETION_KEY_IO)
@@ -358,6 +366,7 @@ void* Network::WorkerThread(NetworkState* netstate)
                 if (pOver != NULL)
                 {
                     Request* request = reinterpret_cast<Request*>(pOver);
+
                     // Populate buffer size for user
                     request->packet.buffersize = bytesTrans;
 
@@ -377,30 +386,24 @@ void* Network::WorkerThread(NetworkState* netstate)
         }
         else
         {
-            // pOver may not be null
-            // Which means this request was dequeued..
-            // therefore, we can release it.
-            if (pOver != NULL)
-            {
-                Request* request = reinterpret_cast<Request*>(pOver);
-                netstate->socket.overlapPool.release(request->index);
-            }
 
             DWORD gle = GetLastError();
-            if (gle == ERROR_PORT_UNREACHABLE)
+            std::cout << "Worker: GetLastError() -> " << gle << std::endl;
+
+            if (pOver != NULL)
             {
-                std::cout << "Worker: A sent packet was rejected\n" << std::endl;
-                Network::read(*netstate);
+                std::cout << "Worker: IO Packet Valid"  << std::endl;
+                Request* request = reinterpret_cast<Request*>(pOver);
+                // Relinquish this overlapped structure
+                netstate->socket.overlapPool.release(request->index);
             }
             else
             {
-                // Problem
-                std::cout << "Worker: ERROR GetQueuedCompletionStatus(): gle=" << gle << std::endl;
-                return NULL;
+                std::cout << "Worker: IO Packet Invalid" << std::endl;
             }
         }
     }
-    std::cout << "Worker: Shutdown Complete\n";
+    std::cout << "Worker Thread [" << tid << "] is Shutting down.\n";
     return NULL;
 }
 
@@ -427,6 +430,7 @@ bool Network::GetLocalAddressInfo(NetworkState& netstate, Socket & s)
     else
     {
         // Note; we're hoping that the first valid address is the right address. glta. lol.
+        memset(&s.local.addr, 0, sizeof(s.local.addr));
         s.local.len = res->ai_addrlen;
         memcpy(&s.local.addr, res->ai_addr, res->ai_addrlen);
 
@@ -452,7 +456,12 @@ bool Network::GetLocalAddressInfo(NetworkState& netstate, Socket & s)
     return status;
 }
 
-Network::Result Network::initialize(NetworkState& netstate, uint32_t maxThreads, uint16_t port, NetworkState::IOHandler handler, void* handlercontext)
+Network::Result Network::initialize(NetworkState& netstate,
+                                    uint32_t maxThreads,
+                                    uint16_t port,
+                                    NetworkState::IOHandler handler,
+                                    void* handlercontext
+)
 {
     Network::Result result(Network::ResultType::SUCCESS);
 
@@ -463,6 +472,17 @@ Network::Result Network::initialize(NetworkState& netstate, uint32_t maxThreads,
     netstate.handlercontext = handlercontext;
 
     Network::initnet();
+    Network::createSocket(netstate.socket, COMPLETION_KEY_IO);
+
+    //  When a client grace-lessly disconnects... the ICMP CONNRESET fucks us up.
+    // TODO: hmm... feels cheap... root cause please.
+    // SIO_UDP_CONNRESET := (IOC_IN | IOC_VENDOR | 12);
+    uint32_t flag = 0;
+    DWORD ret = 0;
+    WSAIoctl(netstate.socket.handle, IOC_IN | IOC_VENDOR | 12, &flag, 4, NULL, 0, &ret, NULL, 0);
+
+    Network::bindSocket(netstate);
+    
     Network::createPort(netstate.ioPort);
     Network::createWorkerThreads(netstate);
     return result;
@@ -471,8 +491,6 @@ Network::Result Network::initialize(NetworkState& netstate, uint32_t maxThreads,
 Network::Result Network::start(NetworkState& netstate)
 {
     Network::Result result(Network::ResultType::SUCCESS);
-    Network::createSocket(netstate.socket, COMPLETION_KEY_IO);
-    Network::bindSocket(netstate);
     Network::associateSocketWithIOCPort(netstate.ioPort, netstate.socket);
 
     Network::startWorkerThreads(netstate);
@@ -481,7 +499,15 @@ Network::Result Network::start(NetworkState& netstate)
     uint32_t rc=0;
     do
     {
-        assert(Network::read(netstate).type == bali::Network::ResultType::SUCCESS);
+        if (Network::read(netstate).type == bali::Network::ResultType::SUCCESS)
+        {
+            std::cout << "Read Queued.\n";
+        }
+        else
+        {
+            std::cout << "ERROR: Read NOT Queued.\n";
+            break;
+        }
         rc++;
     }while (rc < netstate.maxThreads/2);
     return result;
@@ -490,7 +516,9 @@ Network::Result Network::start(NetworkState& netstate)
 Network::Result Network::stop(NetworkState& netstate)
 {
     Network::Result result(Network::ResultType::SUCCESS);
-
+    Network::shutdownWorkerThreads(netstate);
+    netstate.socket.cleanup();
+    CloseHandle(netstate.ioPort);
     return result;
 }
 

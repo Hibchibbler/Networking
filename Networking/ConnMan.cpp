@@ -12,13 +12,14 @@ namespace bali
 #define BAD_NUMBER_D 20000      // read general & ack
 #define BAD_NUMBER_E 20000       // write General & Ack
 
-//#define SHOW_PING_PRINTS
+//#define PRINT_HEADER
+#define SHOW_PING_PRINTS
 
 void
 ConnMan::Initialize(
     NetworkConfig & netcfg,
     ConnManState::ConnManType cmtype,
-    uint32_t thisport,
+    uint32_t thisport, // I think; pass zero to bind to ANY port
     uint32_t numplayers,
     std::string gamename,
     std::string gamepass,
@@ -47,53 +48,60 @@ ConnMan::Initialize(
     cmstate.onevent = onevent;
     cmstate.oneventcontext = oneventcontext;
 
+    //Network::createSocket(cmstate.netstate.socket, COMPLETION_KEY_IO);
+
     if (cmstate.cmtype == ConnManState::ConnManType::SERVER ||
         cmstate.cmtype == ConnManState::ConnManType::PASS_THROUGH)
     {
-        Network::initialize(cmstate.netstate, 8, thisport, ConnMan::ConnManServerIOHandler, this);
+        Network::initialize(cmstate.netstate, 1, thisport, ConnMan::ConnManServerIOHandler, this);
+
+        //Network::bindSocket(cmstate.netstate);
     }
     else if (cmstate.cmtype == ConnManState::ConnManType::CLIENT)
     {
         Network::initialize(cmstate.netstate, 1, thisport, ConnMan::ConnManClientIOHandler, this);
+
+        //Network::bindSocket(cmstate.netstate);
     }
-    Network::start(cmstate.netstate);
-}
-
-void
-ConnMan::Initialize(
-    NetworkConfig & netcfg,
-    ConnManState::ConnManType cmtype,
-    uint32_t thisport,
-    ConnManState::OnEvent onevent,
-    void* oneventcontext
-)
-{
-    srand(1523791);
-
-    cmstate.cmtype = cmtype;
-    cmstate.thisport = thisport;
-
-    cmstate.numplayers = 0;
-    cmstate.gamename = "";
-    cmstate.gamepass = "";
-
-    cmstate.timeout_warning_ms = netcfg.TIMEOUT_WARNING_MS;
-    cmstate.timeout_ms = netcfg.TIMEOUT_MS;
-    cmstate.ack_timeout_ms = netcfg.ACK_TIMEOUT_MS;
-    cmstate.heart_beat_ms = netcfg.HEART_BEAT_MS;
-    cmstate.retry_count = netcfg.RETRY_COUNT;
-
-    cmstate.done = 0;
-    cmstate.connectionsmutex.create();
-    cmstate.globalrxmutex.create();
-
-    cmstate.onevent = onevent;
-    cmstate.oneventcontext = oneventcontext;
-
-    Network::initialize(cmstate.netstate, 8, thisport, ConnMan::ConnManServerIOHandler, this);
 
     Network::start(cmstate.netstate);
 }
+
+//void
+//ConnMan::Initialize(
+//    NetworkConfig & netcfg,
+//    ConnManState::ConnManType cmtype,
+//    uint32_t thisport,
+//    ConnManState::OnEvent onevent,
+//    void* oneventcontext
+//)
+//{
+//    srand(1523791);
+//
+//    cmstate.cmtype = cmtype;
+//    cmstate.thisport = thisport;
+//
+//    cmstate.numplayers = 0;
+//    cmstate.gamename = "";
+//    cmstate.gamepass = "";
+//
+//    cmstate.timeout_warning_ms = netcfg.TIMEOUT_WARNING_MS;
+//    cmstate.timeout_ms = netcfg.TIMEOUT_MS;
+//    cmstate.ack_timeout_ms = netcfg.ACK_TIMEOUT_MS;
+//    cmstate.heart_beat_ms = netcfg.HEART_BEAT_MS;
+//    cmstate.retry_count = netcfg.RETRY_COUNT;
+//
+//    cmstate.done = 0;
+//    cmstate.connectionsmutex.create();
+//    cmstate.globalrxmutex.create();
+//
+//    cmstate.onevent = onevent;
+//    cmstate.oneventcontext = oneventcontext;
+//
+//    Network::initialize(cmstate.netstate, 8, thisport, ConnMan::ConnManServerIOHandler, this);
+//
+//    Network::start(cmstate.netstate);
+//}
 
 uint64_t
 ConnMan::ReadyCount(
@@ -118,8 +126,29 @@ void
 ConnMan::Cleanup(
 )
 {
+    //if (this->cmstate.cmtype == ConnManState::ConnManType::SERVER)
+    {
+        cmstate.connectionsmutex.lock();
+        for (auto co = cmstate.connections.begin(); co != cmstate.connections.end(); co++)
+        {
+            uint32_t cs = 13;
+            Packet packet =
+                ConnMan::CreateDisconnectPacket((*co)->who,
+                                                (*co)->id,
+                                                (*co)->outseq,
+                                                (*co)->inseq);
+            Write(packet);
+            break;
+        }
+        cmstate.connections.clear();
+        cmstate.connectionsmutex.unlock();
+    }
+    /*else
+    {
+    }*/
+
     Network::stop(cmstate.netstate);
-    cmstate.connectionsmutex.destroy();
+    //cmstate.connectionsmutex.destroy();
 }
 
 RequestFuture
@@ -143,14 +172,16 @@ ConnMan::SendBuffer(
     AddMagic(pMsg);
     pMsg->header.code = (uint8_t)MESG::HEADER::Codes::General;
     pMsg->header.id = pConn->id;
-
+    memcpy(pMsg->payload.general.buffer, buffer, buffersize);
+    
     packet.ackhandler = nullptr;
     if (sendType == ConnMan::SendType::WITHRECEIPT)
     {
         pMsg->header.mode = (uint8_t)MESG::HEADER::Mode::Reliable;
-        pMsg->header.seq = pConn->curseq; // Incremented on receipt of ACK
+        pMsg->header.seq = InterlockedIncrement(&pConn->outseq); // Incremented on receipt of ACK
         token = pMsg->header.seq;
-        pMsg->header.ack = pConn->curack;
+        pMsg->header.ack = pConn->inseq;
+
         RequestStatus status;
         status.promise = std::make_shared<RequestPromise>();
         status.seq = pMsg->header.seq;
@@ -164,25 +195,25 @@ ConnMan::SendBuffer(
     else
     {
         pMsg->header.mode = (uint8_t)MESG::HEADER::Mode::Unreliable;
-        pMsg->header.seq = InterlockedIncrement(&pConn->curuseq);
+        pMsg->header.seq = 42;// InterlockedIncrement(&pConn->curuseq);
         token = pMsg->header.seq;
     }
     Write(packet);
     return barrier_future;
 }
-Connection::ConnectingResult
-Connection::Connect(
-    uint32_t randomcode,
-    std::string gamename,
-    std::string gamepass
-)
-{
-    connectingresultpromise = std::make_shared<ConnectingResultPromise>();
-    ConnectingResultFuture cmfuture = connectingresultpromise->get_future();
-    Packet packet = ConnMan::CreateIdentifyPacket(who, playername, curuseq, curack, randomcode, gamename, gamepass);
-    Connection::ConnectingResult state = cmfuture.get();
-    return state;
-}
+//Connection::ConnectingResult
+//Connection::Connect(
+//    uint32_t randomcode,
+//    std::string gamename,
+//    std::string gamepass
+//)
+//{
+//    connectingresultpromise = std::make_shared<ConnectingResultPromise>();
+//    ConnectingResultFuture cmfuture = connectingresultpromise->get_future();
+//    Packet packet = ConnMan::CreateIdentifyPacket(who, playername, randomcode, gamename, gamepass);
+//    Connection::ConnectingResult state = cmfuture.get();
+//    return state;
+//}
 
 
 uint32_t
@@ -193,6 +224,16 @@ ConnMan::ExtractSequenceFromPacket(
     MESG* m = (MESG*)packet.buffer;
     return m->header.seq;
 }
+
+MESG::HEADER::Mode
+ConnMan::ExtractModeFromPacket(
+    Packet & packet
+)
+{
+    MESG* m = (MESG*)packet.buffer;
+    return (MESG::HEADER::Mode)m->header.mode;
+}
+
 void
 ConnMan::UpdateConnection(
     Connection::ConnectionPtr pConn
@@ -211,40 +252,11 @@ ConnMan::UpdateConnection(
         // TODO
         // Basically -- Process General....
         // on.event(MESSAGE_RECEIVED);
+        cmstate.onevent(cmstate.oneventcontext,
+                        ConnManState::OnEventType::MESSAGE_RECEIVED,
+                        pConn->id,
+                        &packet);
     }
-    //
-    // Send Pings
-    //
-    if (pConn->state == Connection::State::ALIVE)
-    {
-        duration d = clock::now() - pConn->heartbeat;
-        if (d.count() > cmstate.heart_beat_ms)
-        {
-            pConn->heartbeat = clock::now();
-            Packet packet = ConnMan::CreatePingPacket(pConn->who, pConn->id, pConn->curuseq, pConn->curack);
-
-            // When we recieve a Pong
-            // we will only be interested
-            // in ack's that match curpingseq/
-            // This implies one ping at a time,
-            // or heart_beat_ms > ack_timeout_ms
-            pConn->pingstart = clock::now();
-            pConn->curpingseq = ConnMan::ExtractSequenceFromPacket(packet);
-            pConn->totalpings++;
-            RequestStatus status;
-            status.promise = std::make_shared<RequestPromise>();
-            status.seq = ConnMan::ExtractSequenceFromPacket(packet);
-            status.starttime = clock::now();
-            status.endtime = clock::now();
-            status.state = RequestStatus::State::PENDING;
-            //future = status.promise->get_future();
-            status.packet = packet;
-            //request_index = status.seq;
-            pConn->AddRequestStatus(status, status.seq);
-
-            Write(packet);
-        }
-    } // If Alive
 
     //
     // Process this connections pending Requests
@@ -305,9 +317,11 @@ ConnMan::UpdateConnection(
     //
     // Kill this connection if it times out
     //
-    duration d = clock::now() - pConn->lastrxtime;
     if (pConn->state == Connection::State::ALIVE)
     {
+        //
+        duration d = clock::now() - pConn->lastrxtime;
+        //std::cout << "Player " << pConn->id << ", d= " << d.count() << std::endl;
         if (d.count() > cmstate.timeout_ms)
         {
             pConn->state = Connection::State::DEAD;
@@ -326,6 +340,7 @@ ConnMan::UpdateRelayMachine(
     //
     // Service incoming packets
     //
+    cmstate.globalrxmutex.lock();
     while (!cmstate.globalrxqueue.empty())
     {
         Packet packet;
@@ -339,6 +354,7 @@ ConnMan::UpdateRelayMachine(
                         0,
                         &packet);
     }
+    cmstate.globalrxmutex.unlock();
 }
 
 void
@@ -369,7 +385,7 @@ ConnMan::UpdateClientConnection(
         //
         // Send Grack
         //
-        Packet packet = ConnMan::CreateGrackPacket(pConn->who, pConn->id, pConn->curuseq, pConn->curack);
+        Packet packet = ConnMan::CreateGrackPacket(pConn->who, pConn->id, pConn->outseq, pConn->inseq);
         Write(packet);
 
         cmstate.onevent(cmstate.oneventcontext,
@@ -395,6 +411,15 @@ ConnMan::UpdateClientConnection(
         cr.code = Connection::ConnectingResultCode::DENIED;
         pConn->connectingresultpromise->set_value(cr);
     }
+
+    if (pConn->state == Connection::State::DISCONNECTING)
+    {
+        pConn->state = Connection::State::DEAD;
+        cmstate.onevent(cmstate.oneventcontext,
+                        ConnManState::OnEventType::CONNECTION_DISCONNECT,
+                        pConn->id,
+                        nullptr);
+    }
 }
 
 void
@@ -408,8 +433,8 @@ ConnMan::UpdateServerConnections(
         Packet packet =
             ConnMan::CreateGrantPacket(pConn->who,
                 pConn->id,
-                pConn->curuseq,
-                pConn->curack,
+                pConn->outseq,
+                pConn->inseq,
                 pConn->playername);
         Write(packet);
     }
@@ -440,6 +465,50 @@ ConnMan::UpdateServerConnections(
                             nullptr);
         }
     }
+
+    if (pConn->state == Connection::State::DISCONNECTING)
+    {
+        pConn->state = Connection::State::DEAD;
+        cmstate.onevent(cmstate.oneventcontext,
+                        ConnManState::OnEventType::CONNECTION_DISCONNECT,
+                        pConn->id,
+                        nullptr);
+    }
+
+    //
+    // Send Pings
+    //
+    if (pConn->state == Connection::State::ALIVE)
+    {
+        duration d = clock::now() - pConn->heartbeat;
+        if (d.count() > cmstate.heart_beat_ms)
+        {
+            
+            pConn->heartbeat = clock::now();
+            Packet packet = ConnMan::CreatePingPacket(pConn->who, pConn->id, pConn->outseq, pConn->inseq);
+           // std::cout << "Server: Sending Ping to " << pConn->id << " with Seq " << pConn->outseq << std::endl;
+            // When we recieve a Pong
+            // we will only be interested
+            // in ack's that match curpingseq/
+            // This implies one ping at a time,
+            // or heart_beat_ms > ack_timeout_ms
+            pConn->pingstart = clock::now();
+            pConn->curpingseq = ConnMan::ExtractSequenceFromPacket(packet);
+            pConn->totalpings++;
+            RequestStatus status;
+            status.promise = std::make_shared<RequestPromise>();
+            status.seq = ConnMan::ExtractSequenceFromPacket(packet);
+            status.starttime = clock::now();
+            status.endtime = clock::now();
+            status.state = RequestStatus::State::PENDING;
+            //future = status.promise->get_future();
+            status.packet = packet;
+            //request_index = status.seq;
+            pConn->AddRequestStatus(status, status.seq);
+
+            Write(packet);
+        }
+    } // If Alive
 }
 
 void
@@ -579,8 +648,7 @@ ConnMan::ReapDeadConnections(
     auto pConn = cmstate.connections.begin();
     while (pConn != cmstate.connections.end())
     {
-        Connection::ConnectionPtr Love = *pConn;
-        if (Love->state == Connection::State::DEAD)
+        if ((*pConn)->state == Connection::State::DEAD)
         {
             std::cout << "Reap Dead Connection\n";
             pConn = cmstate.connections.erase(pConn);
@@ -628,7 +696,7 @@ ConnMan::ProcessGrant(
             pConn->state = Connection::State::GRACKING;
             pConn->lastrxtime = clock::now();
             pConn->id = cid;
-            pConn->curack = ConnMan::ExtractSequenceFromPacket(packet);
+            pConn->inseq = ConnMan::ExtractSequenceFromPacket(packet);
         }
     }
     else
@@ -647,7 +715,7 @@ ConnMan::ProcessGrack(
     {
         pConn->state = Connection::State::ALIVE;
         pConn->lastrxtime = clock::now();
-        pConn->curack = ConnMan::ExtractSequenceFromPacket(packet);
+        pConn->inseq = ConnMan::ExtractSequenceFromPacket(packet);
     }
 }
 
@@ -678,9 +746,11 @@ ConnMan::ProcessPing(
     {
         MESG* msg = (MESG*)packet.buffer;
         // Send Pong to whoever sent this to us
-        Packet packet = CreatePongPacket(pConn->who, pConn->id, pConn->curuseq, msg->header.seq);
+        pConn->inseq = ConnMan::ExtractSequenceFromPacket(packet);
+
+        Packet packet = CreatePongPacket(pConn->who, pConn->id, pConn->outseq, pConn->inseq);
         pConn->lastrxtime = clock::now();
-        pConn->curack = ConnMan::ExtractSequenceFromPacket(packet);
+        
 
         // Receiving Ping packets are as good as receiving Grack.
         // If still Gracking, be Alive.
@@ -710,12 +780,13 @@ ConnMan::ProcessPong(
         {
             if (pReq->second.state == RequestStatus::State::PENDING)
             {
+                //std::cout << "Received Pong from " << pConn->id << " with Ack " << msg->header.ack << std::endl;
                 pReq->second.state = RequestStatus::State::DYING;
                 clock::time_point startTime = pReq->second.starttime;
                 clock::time_point endTime = clock::now();
                 pConn->lastrxtime = endTime;
                 pConn->totalpongs++;
-                pConn->curack = ConnMan::ExtractSequenceFromPacket(packet);
+                pConn->inseq = ConnMan::ExtractSequenceFromPacket(packet);
                 pConn->RemoveRequestStatus(msg->header.ack);
 
                 pConn->curping = std::chrono::duration_cast<std::chrono::microseconds>(endTime - startTime).count();
@@ -757,6 +828,12 @@ ConnMan::ProcessRxPacket(
     Packet& packet
 )
 {
+    uint32_t cid = ExtractConnectionIdFromPacket(packet);
+
+    cmstate.connectionsmutex.lock();
+    Connection::ConnectionPtr pConn = ConnMan::GetConnectionById(cmstate.connections, cid);
+    cmstate.connectionsmutex.unlock();
+
     cmstate.globalrxmutex.lock();
     cmstate.globalrxqueue.push(packet);
     cmstate.globalrxmutex.unlock();
@@ -777,17 +854,34 @@ ConnMan::ProcessGeneral(
         {
             pConn->state = Connection::State::ALIVE;
         }
+
+        // Drop packets whose seq is older than that which we've already seen.
+        // Drop out of order packets.
+        uint32_t seq = ExtractSequenceFromPacket(packet);
+        MESG::HEADER::Mode mode = ExtractModeFromPacket(packet);
+        //std::cout << "Seq: " << seq << ",  inseq: " << pConn->inseq << std::endl;
+        if (mode == MESG::HEADER::Mode::Reliable)
+        {
+            if (seq < pConn->inseq + 1)
+            {
+                std::cout << "Dropping Out of Order Packet\n";
+                return;
+            }
+        }
+        
+        pConn->lastrxtime = clock::now();
+        //std::cout << "Player " << pConn->id << ", lastrxtime updated " << std::endl;
+        pConn->inseq = ConnMan::ExtractSequenceFromPacket(packet);
         pConn->rxpackets.push(packet);
 
-        pConn->lastrxtime = clock::now();
-        pConn->curack = ConnMan::ExtractSequenceFromPacket(packet);
+
         /*
-        On Packet Receive, If packet is reliable, Then send Ack packet unreliably.
+          On Packet Receive, If packet is reliable, Then send Ack packet unreliably.
         */
         MESG* msg = (MESG*)packet.buffer;
         if (msg->header.mode == (uint8_t)MESG::HEADER::Mode::Reliable)
         {
-            Packet packet = ConnMan::CreateAckPacket(pConn->who, pConn->id, pConn->curuseq, msg->header.seq);
+            Packet packet = ConnMan::CreateAckPacket(pConn->who, pConn->id, pConn->outseq, pConn->inseq);
             Write(packet);
         }
     }
@@ -805,7 +899,7 @@ ConnMan::ProcessAck(
 {
     if (pConn)
     {
-        pConn->curack = ConnMan::ExtractSequenceFromPacket(packet);
+        pConn->inseq = ConnMan::ExtractSequenceFromPacket(packet);
 
         MESG* pMsg = (MESG*)packet.buffer;
         uint32_t ack = pMsg->header.ack;
@@ -816,7 +910,7 @@ ConnMan::ProcessAck(
             if (pReq->second.state == RequestStatus::State::PENDING)
             {
                 pReq->second.state = RequestStatus::State::ACKNOWLEDGED;
-                InterlockedIncrement(&pConn->curseq);
+                //InterlockedIncrement(&pConn->outseq);
                 pConn->lastrxtime = clock::now();
                 pReq->second.endtime = clock::now();
             }
@@ -850,16 +944,27 @@ ConnMan::ConnManClientIOHandler(
 {
     bali::Network::Result result(bali::Network::ResultType::SUCCESS);
     ConnMan& cm = *((ConnMan*)cm_);
-
-    if (request->ioType == Request::IOType::READ)
+    if (request == nullptr)
+    {
+        // ConnMann was notified of an error or warning in Network subsystem
+        //std::cout << "ConnMann was notified of an error or warning in Network subsystem." << std::endl;
+        cm.cmstate.onevent(cm.cmstate.oneventcontext,
+                           ConnManState::OnEventType::NOTIFICATION_ERROR,
+                           0,
+                           nullptr);
+        Network::read(cm.cmstate.netstate);
+        return;
+    }
+    else if (request->ioType == Request::IOType::READ)
     {
         Network::read(cm.cmstate.netstate);
         if (ConnMan::IsMagicGood(request->packet))
         {
             if (ConnMan::IsSizeValid(request->packet))
             {
-#ifndef SHOW_PING_PRINTS
                 MESG* m = (MESG*)request->packet.buffer;
+#ifdef PRINT_HEADER
+#ifndef SHOW_PING_PRINTS
                 if (m->header.code != (uint32_t)MESG::HEADER::Codes::Ping &&
                     m->header.code != (uint32_t)MESG::HEADER::Codes::Pong)
 #endif
@@ -870,7 +975,7 @@ ConnMan::ConnManClientIOHandler(
                         << "[" << m->header.seq << "]"
                         << "[" << m->header.ack << "]" << std::endl;
                 }
-
+#endif
                 cm.ProcessRxPacket(request->packet);
             }
             else
@@ -888,6 +993,7 @@ ConnMan::ConnManClientIOHandler(
     else if (request->ioType == Request::IOType::WRITE)
     {
         MESG* m = (MESG*)request->packet.buffer;
+#ifdef PRINT_HEADER
 #ifndef SHOW_PING_PRINTS
         if (m->header.code != (uint32_t)MESG::HEADER::Codes::Ping &&
             m->header.code != (uint32_t)MESG::HEADER::Codes::Pong)
@@ -899,6 +1005,7 @@ ConnMan::ConnManClientIOHandler(
                       << "[" << m->header.seq << "]"
                       << "[" << m->header.ack << "]" << std::endl;
         }
+#endif
     }
 }
 void
@@ -908,8 +1015,8 @@ ConnMan::ProcessDisconnect(
 {
     if (pConn->state == Connection::State::ALIVE)
     {
-        pConn->state = Connection::State::DEAD;
-        std::cout << "ProcessDisconnect(): Connection Alive -> Dead\n";
+        pConn->state = Connection::State::DISCONNECTING;
+        std::cout << "ProcessDisconnect(): Connection Alive -> Disconnecting\n";
     }
 }
 void
@@ -932,6 +1039,8 @@ ConnMan::ProcessIdentify(
                 bool isnameavail = ConnMan::IsPlayerNameAndIdAvailable(cmstate.connections, pn, id);
                 if (!isnameavail)
                 {
+                    // Connection is already stashed away because, obviously, we're a client that is making an
+                    // outgoing connection?? wt f.
                     pConn = ConnMan::GetConnectionById(cmstate.connections, id);
                 }
 
@@ -952,9 +1061,9 @@ ConnMan::ProcessIdentify(
                                                  Connection::State::IDENTIFIED
                         );
 
-                        pConn->curseq = randomNumber;
-                        pConn->curuseq = randomNumber;
-                        pConn->curack = ConnMan::ExtractSequenceFromPacket(request->packet);
+                        pConn->outseq = randomNumber + 10;
+                        //pConn->curuseq = randomNumber + 20;//randomNumber;
+                        pConn->inseq = ConnMan::ExtractSequenceFromPacket(request->packet);
                         cmstate.AddConnection(pConn);
                     }
                     else
@@ -971,8 +1080,8 @@ ConnMan::ProcessIdentify(
                     // This is a rebroadcast. Same Id, same Grant.
                     Packet packet = ConnMan::CreateGrantPacket(pConn->who,
                                                       pConn->id,
-                                                      pConn->curuseq,
-                                                      pConn->curack,
+                                                      pConn->outseq,
+                                                      pConn->inseq,
                                                       pConn->playername);
                     Write(packet);
                     std::cout << "Tx Grant: Reconnect\n";
@@ -1011,8 +1120,19 @@ ConnMan::ConnManServerIOHandler(
 {
     bali::Network::Result result(bali::Network::ResultType::SUCCESS);
     ConnMan& cm = *((ConnMan*)cm_);
+    if (request == nullptr)
+    {
+        // ConnMann was notified of an error or warning in Network subsystem
+        // std::cout << "ConnMann was notified of an error or warning in Network subsystem." << std::endl;
+        cm.cmstate.onevent(cm.cmstate.oneventcontext,
+                           ConnManState::OnEventType::NOTIFICATION_ERROR,
+                           0,
+                           nullptr);
 
-    if (request->ioType == Request::IOType::READ)
+        Network::read(cm.cmstate.netstate);
+
+    }
+    else if (request->ioType == Request::IOType::READ)
     {
         Network::read(cm.cmstate.netstate);
         /*
@@ -1029,8 +1149,9 @@ ConnMan::ConnManServerIOHandler(
         {
             if (ConnMan::IsSizeValid(request->packet))
             {
-#ifndef SHOW_PING_PRINTS
                 MESG* m = (MESG*)request->packet.buffer;
+#ifdef PRINT_HEADER
+#ifndef SHOW_PING_PRINTS
                 if (m->header.code != (uint32_t)MESG::HEADER::Codes::Ping &&
                     m->header.code != (uint32_t)MESG::HEADER::Codes::Pong)
 #endif
@@ -1041,6 +1162,7 @@ ConnMan::ConnManServerIOHandler(
                               << "[" << m->header.seq << "]"
                               << "[" << m->header.ack << "]" << std::endl;
                 }
+#endif
                 if (ConnMan::IsCode(request->packet, MESG::HEADER::Codes::Identify) &&
                     cm.cmstate.cmtype != ConnManState::ConnManType::PASS_THROUGH)
                 {
@@ -1070,6 +1192,7 @@ ConnMan::ConnManServerIOHandler(
     else if (request->ioType == Request::IOType::WRITE)
     {
         MESG* m = (MESG*)request->packet.buffer;
+#ifdef PRINT_HEADER
 #ifndef SHOW_PING_PRINTS
         if (m->header.code != (uint32_t)MESG::HEADER::Codes::Ping &&
             m->header.code != (uint32_t)MESG::HEADER::Codes::Pong)
@@ -1082,6 +1205,7 @@ ConnMan::ConnManServerIOHandler(
                       << "[" << m->header.ack << "]"
                       << std::endl;
         }
+#endif
     }
 
     return;
@@ -1140,8 +1264,8 @@ ConnMan::GetConnectionById(
 {
     for ( auto & c : connections )
     {
-        if ( c->state != Connection::State::DYING &&
-            c->state != Connection::State::DEAD )
+        //if ( c->state != Connection::State::DYING &&
+        //    c->state != Connection::State::DEAD )
         {
             if ( id == c->id )
             {
@@ -1222,8 +1346,8 @@ Connection::RemoveRequestStatus(
     uint32_t sid
 )
 {
-    //std::cout << "Removing Dead Request...\n";
     reqstatusmutex.lock();
+    //std::cout << "Removing Dead Request " << sid << std::endl;
     reqstatus.erase(sid);
     reqstatusmutex.unlock();
 }
@@ -1233,7 +1357,8 @@ bool
 ConnMan::SendUnreliable(
     ConnMan & cm,
     uint32_t uid,
-    const char* szString
+    const char* szString,
+    uint32_t size
 )
 {
     bool ret = false;
@@ -1244,7 +1369,7 @@ ConnMan::SendUnreliable(
         cm.SendBuffer(pConn,
             ConnMan::SendType::WITHOUTRECEIPT,
             (uint8_t*)szString,
-            strlen(szString),
+            size,
             request_index);
         ret = true;
     }
@@ -1255,7 +1380,8 @@ bool
 ConnMan::SendReliable(
     ConnMan & cm,
     uint32_t uid,
-    const char* szString
+    const char* szString,
+    uint32_t size
 )
 {
     bool ret = false;
@@ -1273,7 +1399,7 @@ ConnMan::SendReliable(
                 cm.SendBuffer(pConn,
                     ConnMan::SendType::WITHRECEIPT,
                     (uint8_t*)szString,
-                    strlen(szString),
+                    size,
                     request_index);
 
             RequestStatus::RequestResult result = barrier_future.get();
@@ -1312,6 +1438,7 @@ ConnMan::Connect(
     std::string playername,
     std::string gamename,
     std::string gamepass,
+    uint32_t & uid,
     ConnectingResultFuture & result
 )
 {
@@ -1321,6 +1448,7 @@ ConnMan::Connect(
     std::uniform_int_distribution<uint32_t> uni(1, 65536); // guaranteed unbiased
 
     auto rando = uni(rng);
+    uid = rando;
     Connection::ConnectionPtr pConn =
         cm.cmstate.CreateConnection(
             to,
@@ -1338,11 +1466,11 @@ ConnMan::Connect(
 
         Packet packet = ConnMan::CreateIdentifyPacket(pConn->who,
             pConn->playername,
-            pConn->curuseq,
-            pConn->curack,
-            rando,
+            pConn->id,
+            pConn->outseq,
             gamename, gamepass);
         cm.Write(packet);
+        std::cout << "Wrote Identify\n";
         result = std::move(connectingResultFuture);
         ret = true;
     }
@@ -1370,9 +1498,8 @@ Packet
 ConnMan::CreateIdentifyPacket(
     Address& to,
     std::string playername,
-    uint32_t& curseq,
-    uint32_t curack,
-    uint32_t randomcode,
+    uint32_t id,
+    uint32_t seq,
     std::string gamename,
     std::string gamepass
 )
@@ -1390,10 +1517,10 @@ ConnMan::CreateIdentifyPacket(
     MESG* pMsg = (MESG*)packet.buffer;
     AddMagic(pMsg);
     pMsg->header.code = (uint8_t)MESG::HEADER::Codes::Identify;
-    pMsg->header.id = randomcode;
-    curseq = randomcode;
-    pMsg->header.seq = InterlockedIncrement(&curseq);
-    pMsg->header.ack = curack;
+    pMsg->header.id = id;
+    pMsg->header.seq = seq;
+    pMsg->header.ack = 0;
+
     memcpy(pMsg->payload.identify.playername,
         playername.c_str(),
         playername.size());

@@ -1,10 +1,18 @@
 #ifndef NETWORKCONFIG_H_
 #define NETWORKCONFIG_H_
 
-#include "ConfigLoader.h"
+#include <string>
+#include <map>
 
 namespace bali
 {
+
+using NetworkConfigMap = std::map<std::string, std::string>;
+
+NetworkConfigMap
+LoadNetworkConfigBase(
+    std::string fn
+);
 
 struct NetworkConfig
 {

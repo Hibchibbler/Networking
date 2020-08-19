@@ -33,7 +33,7 @@
 namespace bali
 {
 const ULONG MAX_PACKET_SIZE = 1280;
-const ULONG MAX_OVERLAPS = 32;
+const ULONG MAX_OVERLAPS = 16;
 
 class Mutex
 {
@@ -88,6 +88,10 @@ public:
     }
     Address(const Address & address)
     {
+        // We can just use the operator= because 
+        //  we are not allocating/deallocating memory.
+        // Otherwise, copy constructor and assignment operator
+        //  would be optimized differently.
         *this = address;
     }
     Address & operator=(const Address & address)
@@ -115,28 +119,19 @@ class Packet
         }
         Packet(const Packet & packet)
         {
+            // We can just use the operator= because 
+            //  we are not allocating/deallocating memory
             *this = packet;
-        }
-        Packet(Packet && packet)
-        {
-            memcpy(buffer, packet.buffer, MAX_PACKET_SIZE);
-            ackhandler = packet.ackhandler;
-            buffersize = packet.buffersize;
-            address = packet.address;
-        }
-        Packet & operator=(const Packet & packet)
-        {
-            if (this != &packet)
-            {
-                memcpy(buffer, packet.buffer, MAX_PACKET_SIZE);
-                ackhandler = packet.ackhandler;
-                buffersize = packet.buffersize;
-                address = packet.address;
-            }
-            return *this;
-        }
 
-        Packet & operator=(Packet && packet)
+        }
+        //Packet(Packet && packet)
+        //{
+        //    memcpy(buffer, packet.buffer, MAX_PACKET_SIZE);
+        //    ackhandler = packet.ackhandler;
+        //    buffersize = packet.buffersize;
+        //    address = packet.address;
+        //}
+        Packet & operator=(const Packet & packet)
         {
             if (this != &packet)
             {
@@ -165,9 +160,12 @@ public:
     {
         this->wsaoverlapped.Internal = 0;
         this->wsaoverlapped.InternalHigh = 0;
-        this->wsaoverlapped.Offset = 0;
-        this->wsaoverlapped.OffsetHigh = 0;
+        this->wsaoverlapped.Pointer = 0;
         this->wsaoverlapped.hEvent = 0;
+
+        wsabuf.len = 0;
+        wsabuf.buf = 0;
+
         inuse = OVERLAP_STATUS_NOT_INUSE;
     }
     // WSAOVERLAPPED must be first member
@@ -407,7 +405,7 @@ private:
         HANDLE iocport,
         Socket & s
     );
-
+public:
     static
     Network::Result
     createSocket(
@@ -420,7 +418,7 @@ private:
     bindSocket(
         NetworkState& state
     );
-
+private:
     static
     Network::Result
     shutdownWorkerThreads(

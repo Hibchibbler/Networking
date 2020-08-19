@@ -1,5 +1,5 @@
-heart_beat_ms=1000
-timeout_warning_ms=5000
-timeout_ms=8000
+heart_beat_ms=10000
+timeout_warning_ms=15000
+timeout_ms=20000
 ack_timeout_ms=500
 retry_count=6

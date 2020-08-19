@@ -61,8 +61,44 @@ struct GRACK
 
 struct MESG
 {
+    MESG() {}
+    ~MESG() {}
+    MESG(const MESG& rhs)
+    {
+        *this = rhs;
+    }
+
+    MESG& operator=(const MESG& rhs)
+    {
+        if (this != &rhs)
+        {
+            memcpy(payload.raw, rhs.payload.raw, MAX_PACKET_SIZE - 128);
+        }
+        return *this;
+    }
     struct HEADER
     {
+        HEADER() {}
+        ~HEADER() {}
+        HEADER(const HEADER& rhs)
+        {
+            *this = rhs;
+        }
+
+        HEADER& operator=(const HEADER& rhs)
+        {
+            if (this != &rhs)
+            {
+                memcpy(magic, rhs.magic, 2);
+                code = rhs.code;
+                mode = rhs.mode;
+                id = rhs.id;
+                seq = rhs.seq;
+                ack = rhs.ack;
+            }
+            return *this;
+        }
+
         enum class Codes {
             Identify,
             Grant,
@@ -97,6 +133,7 @@ struct MESG
         PINGPONG    pingpong;
         DISCONNECT  disconnect;
         GRACK       grack;
+        uint8_t     raw[MAX_PACKET_SIZE - 128];
     }payload;
 };
 
@@ -192,7 +229,7 @@ public:
     void
     Initialize(
         Address to,
-        std::string playername,
+        std::string playername_,
         uint32_t uid,
         Connection::Locality locality,
         Connection::State initstate
@@ -202,12 +239,19 @@ public:
         // because we have not yet been GRANTed
         id = uid;
         state = initstate;
-        curseq = uid % 256;
-        curack = 0;
-        highseq = uid % 256;
-        curuseq = uid % 128;
-        curuack = 0;
-        highuseq = uid % 128;
+        //curseq = uid+10;// % 256;
+        //curack = 0;
+        //highseq = uid;// % 256;
+        //curuseq = uid+20;// % 128;
+        //curuack = 0;
+        //highuseq = uid;// % 128;
+
+        outseq = uid + 10;
+        inack = 0;
+
+        inseq = 0;
+        outack = 0;
+
         lastrxtime = clock::now();
         lasttxtime = clock::now();
 
@@ -215,7 +259,7 @@ public:
         reqstatusmutex.create();
         rxpacketmutex.create();
         who = to;
-        playername = playername;
+        playername = playername_;
         this->locality = locality;
     }
 
@@ -251,13 +295,18 @@ public:
     uint32_t            id;
     Address             who;
 
-    uint32_t            curseq; // Reliable
-    uint32_t            curack; // Reliable
-    uint32_t            highseq;
+    uint32_t            inseq; // We receive, from the other side, their own random number
+    uint32_t            inack; // They (the server) starts with a reply to us, therefore, their first ack (inack) is to our first seq (outseq)
+    uint32_t            outseq; // We start with our own random number 
+    uint32_t            outack; // We don't start with anything to ack
 
-    uint32_t            curuseq; // Unreliable
-    uint32_t            curuack; // Unreliable
-    uint32_t            highuseq;
+    //uint32_t            curseq; // Reliable
+    //uint32_t            curack; // Reliable
+    //uint32_t            highseq;
+
+    //uint32_t            curuseq; // Unreliable
+    //uint32_t            curuack; // Unreliable
+    //uint32_t            highuseq;
 
     Locality            locality;   // TODO: was thinking this could
                                     // be used to merge client and server code
@@ -318,6 +367,7 @@ struct ConnManState
         NOTIFICATION_WARNING,
         NOTIFICATION_ERROR
     };
+
     typedef void(*OnEvent)(void* oecontext, OnEventType t, uint32_t uid, Packet* packet);
     ConnManType             cmtype;
     uint64_t                timeticks;
@@ -341,7 +391,6 @@ struct ConnManState
 
     NetworkState            netstate;
     Mutex                   connectionsmutex;
-    
 
     Mutex               globalrxmutex;
     std::queue<Packet>  globalrxqueue;
@@ -351,7 +400,6 @@ struct ConnManState
     void
     AddConnection(Connection::ConnectionPtr pConn)
     {
-        std::cout << "AddConnection: Connections.size= " << connections.size() << std::endl;
         connectionsmutex.lock();
         connections.push_back(pConn);
         connectionsmutex.unlock();
@@ -409,14 +457,14 @@ public:
         void* oneventcontext
     );
 
-    void
-    Initialize(
-        NetworkConfig & netcfg,
-        ConnManState::ConnManType cmtype,
-        uint32_t thisport,
-        ConnManState::OnEvent onevent,
-        void* oneventcontext
-    );
+    //void
+    //Initialize(
+    //    NetworkConfig & netcfg,
+    //    ConnManState::ConnManType cmtype,
+    //    uint32_t thisport,
+    //    ConnManState::OnEvent onevent,
+    //    void* oneventcontext
+    //);
 
     void
         UpdateRelayMachine(
@@ -602,6 +650,7 @@ public:
         std::string playername,
         std::string gamename,
         std::string gamepass,
+        uint32_t & uid,
         ConnectingResultFuture & result
     );
 
@@ -610,7 +659,8 @@ public:
     SendUnreliable(
         ConnMan & cm,
         uint32_t uid,
-        const char* szString
+        const char* szString,
+        uint32_t size
     );
 
     static
@@ -618,7 +668,8 @@ public:
     SendReliable(
         ConnMan & cm,
         uint32_t uid,
-        const char* szString
+        const char* szString,
+        uint32_t size
     );
 
     static
@@ -687,11 +738,10 @@ public:
     static
     Packet
     CreateIdentifyPacket(
-        Address& to,
+        Address&    to,
         std::string playername,
-        uint32_t& curseq,
-        uint32_t curack,
-        uint32_t randomcode,
+        uint32_t    id,
+        uint32_t    seq,
         std::string gamename,
         std::string gamepass
     );
@@ -754,6 +804,12 @@ public:
     static
     uint32_t
     ExtractSequenceFromPacket(
+        Packet & packet
+    );
+
+    static
+    MESG::HEADER::Mode
+    ExtractModeFromPacket(
         Packet & packet
     );
 

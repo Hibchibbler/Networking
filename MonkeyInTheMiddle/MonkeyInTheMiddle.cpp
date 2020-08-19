@@ -68,7 +68,9 @@ std::queue<Packet> gBPackets; // from that to this
 std::list<PacketInfo> gADetoured;
 std::list<PacketInfo> gBDetoured;
 
-
+uint64_t gStart_us = 0;
+uint64_t gLatencySpecified_us = 0;
+uint64_t gLatencyCurrent_us = 0;
 BOOL
 WINAPI
 SignalFunction(
@@ -104,55 +106,65 @@ ProcessShenanigans(Mutex & mutex, std::queue<Packet> & packets, std::list<Packet
     std::uniform_int_distribution<uint32_t> uni(1, 1000); // guaranteed unbiased
     // From That to This
     mutex.lock();
-    if (!packets.empty())
+
+    while (!packets.empty())
     {
         Packet p = packets.front();
         packets.pop();
+        p.address = address;//gAAddress;
+        //
+        //// TODO: randomize expiry
+        PacketInfo newpi(clock::now() + std::chrono::microseconds(gLatencyCurrent_us));
+        newpi.packet = p;
 
-        auto random_integer = uni(rng);
-        if (random_integer >= 0 && random_integer < 850)
+        paused.push_back(newpi);
+        //cm.Write(p);
+        std::cout << "+";
+
+        //auto random_integer = uni(rng);
+        //if (random_integer >= 0 && random_integer < 850)
+        //{
+        //    p.address = address;//gAAddress;
+        //    cm.Write(p);
+        //    std::cout << ".";
+        //}
+        //else if (random_integer >= 850 && random_integer < 950)
+        //{
+        //    std::cout << "Pause\n";
+
+        //    // TODO: randomize expiry
+        //    PacketInfo newpi(clock::now() + std::chrono::milliseconds(uni(rng) % 1000));
+        //    newpi.packet = p;
+
+        //    paused.push_back(newpi);
+        //}
+        //else
+        //{
+        //    std::cout << "Dropped\n";
+        //}
+    }
+    //if (paused.size() > 0)
+    //{
+    auto iter = paused.begin();
+    while (iter != paused.end())
+    {
+        if (clock::now() >= iter->expiry)
         {
-            p.address = address;//gAAddress;
-            cm.Write(p);
-            std::cout << ".";
-        }
-        else if (random_integer >= 850 && random_integer < 950)
-        {
-            std::cout << "Pause\n";
-
-            // TODO: randomize expiry
-            PacketInfo newpi(clock::now() + std::chrono::milliseconds(uni(rng) % 1000));
-            newpi.packet = p;
-
-            paused.push_back(newpi);
+            //std::cout << "Resume\n";
+            PacketInfo pi = *iter;
+            std::cout << "-";
+            pi.packet.address = address;//gAAddress;
+            gThatConnMan.Write(pi.packet);
+            iter = paused.erase(iter);
         }
         else
         {
-            std::cout << "Dropped\n";
+            iter++;
         }
     }
-    if (paused.size() > 0)
-    {
-        auto iter = paused.begin();
-        while (iter != paused.end())
-        {
-            if (clock::now() >= iter->expiry)
-            {
-                std::cout << "Resume\n";
-                PacketInfo pi = *iter;
-
-                pi.packet.address = address;//gAAddress;
-                gThisConnMan.Write(pi.packet);
-                iter = paused.erase(iter);
-            }
-            else
-            {
-                iter++;
-            }
-        }
 
 
-    }
+    //}
     mutex.unlock();
 }
 
@@ -176,7 +188,14 @@ int main(int argc, char** argv)
     //
     // Argument handling
     //
-    if (argc == 4)
+    if (argc == 5)
+    {
+        thisport = std::atol(argv[1]);
+        thatport = std::atol(argv[2]);
+        thatipv4 = std::string(argv[3]);
+        gLatencySpecified_us = std::atoll(argv[4]);
+    }
+    else if (argc == 4)
     {
         thisport = std::atol(argv[1]);
         thatport = std::atol(argv[2]);
@@ -184,7 +203,7 @@ int main(int argc, char** argv)
     }
     else
     {
-        std::cout << "Usage:\n\t" << argv[0] << " <thisport> <thatport> <thatipv4>\n";
+        std::cout << "Usage:\n\t" << argv[0] << " <thisport> <thatport> <thatipv4> [latency (us)]\n";
         return 0;
     }
 
@@ -192,6 +211,7 @@ int main(int argc, char** argv)
     std::cout << "This ipv4: " << thatipv4 << "\n";// weirdos
     std::cout << "That port: " << thatport << "\n";
     std::cout << "That ipv4: " << thatipv4 << "\n";
+    std::cout << "Latency  : " << gLatencySpecified_us << "\n";
 
     //
     // Initialize ConnMan Server
@@ -205,13 +225,13 @@ int main(int argc, char** argv)
 
     gThisConnMan.Initialize(netcfg,
                         ConnManState::ConnManType::PASS_THROUGH,
-                        thisport,
+                        thisport, 2, "Bali", "Bear",
                         OnEventThis,
                         &gSharedContext);
 
     gThatConnMan.Initialize(netcfg,
                         ConnManState::ConnManType::PASS_THROUGH,
-                        thisport + 1,
+                        thisport + 1, 2, "Bali", "Bear",
                         OnEventThat,
                         &gSharedContext);
     gThisAddress = ConnMan::CreateAddress(thisport, thatipv4.c_str());//we're just pretending it's all on same ip
@@ -245,7 +265,7 @@ int main(int argc, char** argv)
                            gThisConnMan,
                            gAAddress);
 
-        Sleep(10);
+        //Sleep(10);
     }
 
     //
@@ -315,9 +335,10 @@ InputFunction(
     {
         std::cin >> input;
         strinput = std::string(input, strlen(input));
-        if (strinput == "p")
+        if (strinput == "l")
         {
-
+            //Engage Latency
+            gLatencyCurrent_us = gLatencySpecified_us;
         }
 
         Sleep(0);
